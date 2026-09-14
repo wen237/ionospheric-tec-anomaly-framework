@@ -1,0 +1,14 @@
+# Python
+__pycache__/
+*.py[cod]
+
+# Local research and validation data
+processed/
+*.npz
+
+# IDE
+.vscode/
+
+# Operating system
+.DS_Store
+Thumbs.db
