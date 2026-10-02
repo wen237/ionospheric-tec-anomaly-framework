@@ -10,13 +10,15 @@ The framework is organized into three main components:
 2. Statistical–Clustering Hybrid Module
 3. Spatial Anomaly Verification Framework
 
-The repository is currently being organized and validated module by module.
+The repository is being organized and validated module by module. The
+Temporal Anomaly Detection Framework and the Statistical–Clustering Hybrid
+Module are currently implemented and scientifically validated.
 
 ## Current Status
 
-### Temporal Anomaly Detection Framework
+### 1. Temporal Anomaly Detection Framework
 
-The temporal anomaly detection module has been implemented and validated.
+The Temporal Anomaly Detection Framework has been implemented and validated.
 
 It includes:
 
@@ -35,6 +37,52 @@ classification:
 - Normal: 610
 - Negative: 97
 
+### 2. Statistical–Clustering Hybrid Module
+
+The Statistical–Clustering Hybrid Module has been implemented and validated.
+Its current implementation consists of two stages: statistical analysis and
+clustering-based temporal pattern extraction.
+
+The statistical analysis stage includes:
+
+- historical TEC dataset construction
+- earthquake sample extraction
+- earthquake subset selection
+- population and subset anomaly calculation
+- one-proportion z-test
+- significant temporal–polarity pattern identification
+
+The clustering stage includes:
+
+- clustering feature construction
+- circular encoding of hour-of-day
+- feature standardization
+- K-means clustering
+- cluster centroid decoding
+- temporal anchor extraction
+- paper-style centroid presentation
+- integrated clustering pipeline
+
+For the Afghanistan case, the validated 30-day analysis window contains
+34 statistically significant cells:
+
+- Positive: 18
+- Negative: 16
+
+Using two clusters, the analysis reproduces the paper-style temporal anchors:
+
+- Day -8, positive polarity
+- Day -22, negative polarity
+
+The implementation has been verified through synthetic tests, fixed
+regression tests, and real-data numerical-equivalence validation against
+the legacy implementation used in the associated study.
+
+### 3. Spatial Anomaly Verification Framework
+
+The Spatial Anomaly Verification Framework has not yet been integrated into
+the current repository structure.
+
 ## Repository Structure
 
 ```text
@@ -44,41 +92,162 @@ src/
     tec_timeseries_collection.py
     plot_temporal_anomaly.py
 
+    statistical_clustering/
+        historical_tec.py
+        earthquake_samples.py
+        earthquake_subset.py
+        population_anomaly.py
+        z_test.py
+        clustering.py
+        feature_scaling.py
+        kmeans_clustering.py
+        centroid_decoding.py
+        temporal_anchors.py
+        centroid_presentation.py
+        pipeline.py
+        reproducibility.py
+
 tests/
-    Software-level and synthetic tests.
+    Statistical, clustering, regression, and temporal-anomaly tests.
+
+    statistical_clustering/
+        Unit and integration tests for the Statistical–Clustering
+        Hybrid Module.
+
+    regression/
+        Fixed Afghanistan regression references and tests.
 
 validation/
     Case-specific scientific validation and legacy-equivalence checks.
 
-See validation/README.md for details about the Afghanistan validation
-workflow and required local data.
+    statistical_clustering/
+        Afghanistan real-data validation for the statistical and
+        clustering workflows.
 
-Dependencies
+    legacy/
+        Legacy reference implementations retained for numerical-
+        equivalence validation.
+```
+
+## Dependencies
 
 The current implementation requires:
 
-Python 3.10+
-NumPy
-Matplotlib
-Development Status
+- Python 3.10+
+- NumPy
+- Matplotlib
+- SciPy
+- scikit-learn
+- pytest
+
+Install the required packages with:
+
+```bash
+python -m pip install -r requirements.txt
+```
+
+## Testing
+
+The Statistical–Clustering Hybrid Module can be tested independently with:
+
+```bash
+python -m pytest tests/statistical_clustering tests/regression -q
+```
+
+These tests include software-level unit tests, integration tests, and a
+fixed Afghanistan regression test.
+
+The Temporal Anomaly Detection Framework is retained in the repository and
+will undergo a separate structural refactoring. Therefore, the current
+Statistical–Clustering validation milestone is tested independently from
+the full repository test suite.
+
+## Scientific Validation
+
+Real-data validation scripts for the Statistical–Clustering Hybrid Module
+are located in:
+
+```text
+validation/statistical_clustering/
+```
+
+They validate the Afghanistan workflow sequentially through:
+
+1. historical TEC reconstruction
+2. earthquake sample extraction
+3. earthquake subset selection
+4. population anomaly calculation
+5. one-proportion z-test
+6. clustering and temporal-anchor extraction
+
+The legacy implementations used for numerical-equivalence comparisons are
+retained separately under:
+
+```text
+validation/legacy/statistical_clustering/
+```
+
+These legacy scripts are reference implementations for scientific
+validation and are not the production interface of the framework.
+
+## External Validation Data
+
+Research data and local validation artifacts are not distributed directly
+with this repository.
+
+The Statistical–Clustering validation workflow uses two external data
+locations:
+
+- CODE GIM data
+- Afghanistan historical TEC and earthquake data
+
+Default local paths and environment-variable overrides are defined in:
+
+```text
+validation/statistical_clustering/config.py
+```
+
+The data locations can be overridden with the following environment
+variables:
+
+```text
+IONO_CODE_GIM_DIR
+IONO_GIMTEC_DATASET_DIR
+```
+
+This allows the validation workflow to be reproduced on another system
+without modifying the validation scripts themselves.
+
+GIM/IONEX data acquisition and parsing are handled separately from the
+scientific analysis framework.
+
+## Reproducibility
+
+The Statistical–Clustering Hybrid Module includes utilities for recording
+the software environment and effective K-means configuration, including
+Python, NumPy, SciPy, and scikit-learn versions and the clustering
+parameters used at runtime.
+
+The reproducibility utilities are provided in:
+
+```text
+src/statistical_clustering/reproducibility.py
+```
+
+## Development Status
 
 The repository is under active development.
 
 Current progress:
 
- Temporal Anomaly Detection Framework
- One-Proportion z-Test
- K-Means Clustering
- Statistical–Clustering Hybrid Module
- Spatial Anomaly Verification Framework
-Data
+- Temporal Anomaly Detection Framework — implemented and validated; structural refactoring planned
+- Statistical–Clustering Hybrid Module — implemented and validated
+- Spatial Anomaly Verification Framework — planned for integration
 
-Research data and local validation artifacts are not distributed directly
-with this repository.
+The current repository contains the individual framework components but
+does not yet provide a fully coupled end-to-end pipeline across all three
+frameworks.
 
-GIM/IONEX data acquisition and parsing are handled separately from the
-scientific analysis framework.
-
-License
+## License
 
 License information will be provided with the finalized repository.
