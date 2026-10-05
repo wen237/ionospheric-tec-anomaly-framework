@@ -16,7 +16,7 @@ from datetime import date
 
 import numpy as np
 
-from tec_timeseries import TECTimeSeries
+from .tec_timeseries import TECTimeSeries
 
 
 def _same_longitude(

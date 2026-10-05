@@ -1,13 +1,15 @@
 from datetime import datetime, timedelta
 
 import matplotlib.pyplot as plt
+from matplotlib.axes import Axes
+from matplotlib.figure import Figure
 import numpy as np
 
-from temporal_anomaly import detect_temporal_anomalies
-from plot_temporal_anomaly import plot_temporal_anomaly
+from src.temporal_anomaly.temporal_anomaly import detect_temporal_anomalies
+from src.temporal_anomaly.plotting import plot_temporal_anomaly
 
 
-def main():
+def test_plot_temporal_anomaly_returns_figure_and_axes():
     start = datetime(2022, 1, 1)
 
     epochs = np.array(
@@ -19,7 +21,6 @@ def main():
         dtype=object,
     )
 
-    # A simple repeating diurnal TEC pattern.
     tec = np.array(
         [
             20.0
@@ -31,12 +32,19 @@ def main():
         dtype=float,
     )
 
-    # Add artificial anomalies during the analysis period.
     positive_epoch = datetime(2022, 1, 18, 12)
     negative_epoch = datetime(2022, 1, 19, 12)
 
-    tec[np.where(epochs == positive_epoch)[0][0]] += 15.0
-    tec[np.where(epochs == negative_epoch)[0][0]] -= 15.0
+    positive_index = np.where(
+        epochs == positive_epoch
+    )[0][0]
+
+    negative_index = np.where(
+        epochs == negative_epoch
+    )[0][0]
+
+    tec[positive_index] += 15.0
+    tec[negative_index] -= 15.0
 
     result = detect_temporal_anomalies(
         tec,
@@ -45,24 +53,21 @@ def main():
         threshold_multiplier=3.0,
     )
 
-    print(
-        "Positive anomalies:",
-        np.count_nonzero(result.anomaly == 1),
-    )
-
-    print(
-        "Negative anomalies:",
-        np.count_nonzero(result.anomaly == -1),
-    )
+    assert np.count_nonzero(result.anomaly == 1) >= 1
+    assert np.count_nonzero(result.anomaly == -1) >= 1
 
     fig, ax = plot_temporal_anomaly(
         result,
         title="Synthetic Temporal TEC Anomaly Test",
     )
 
-    plt.show()
+    assert isinstance(fig, Figure)
+    assert isinstance(ax, Axes)
 
+    assert ax.get_title() == (
+        "Synthetic Temporal TEC Anomaly Test"
+    )
 
-if __name__ == "__main__":
-    main()
-    
+    assert len(ax.lines) > 0
+
+    plt.close(fig)

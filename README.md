@@ -87,12 +87,15 @@ the current repository structure.
 
 ```text
 src/
-    temporal_anomaly.py
-    tec_timeseries.py
-    tec_timeseries_collection.py
-    plot_temporal_anomaly.py
+    temporal_anomaly/
+        __init__.py
+        tec_timeseries.py
+        tec_timeseries_collection.py
+        temporal_anomaly.py
+        plotting.py
 
     statistical_clustering/
+        __init__.py
         historical_tec.py
         earthquake_samples.py
         earthquake_subset.py
@@ -110,6 +113,9 @@ src/
 tests/
     Statistical, clustering, regression, and temporal-anomaly tests.
 
+    temporal_anomaly/
+        Unit tests for the Temporal Anomaly Detection Framework.
+
     statistical_clustering/
         Unit and integration tests for the Statistical–Clustering
         Hybrid Module.
@@ -119,6 +125,10 @@ tests/
 
 validation/
     Case-specific scientific validation and legacy-equivalence checks.
+
+    temporal_anomaly/
+        Afghanistan structural, numerical-equivalence, and
+        end-to-end validation for the Temporal Anomaly Detection Framework.
 
     statistical_clustering/
         Afghanistan real-data validation for the statistical and
@@ -157,10 +167,13 @@ python -m pytest tests/statistical_clustering tests/regression -q
 These tests include software-level unit tests, integration tests, and a
 fixed Afghanistan regression test.
 
-The Temporal Anomaly Detection Framework is retained in the repository and
-will undergo a separate structural refactoring. Therefore, the current
-Statistical–Clustering validation milestone is tested independently from
-the full repository test suite.
+The Temporal Anomaly Detection Framework and the Statistical–Clustering
+Hybrid Module are both covered by the repository test suite.
+
+Run the complete software test suite with:
+
+```bash
+python -m pytest tests -q
 
 ## Scientific Validation
 
@@ -240,7 +253,7 @@ The repository is under active development.
 
 Current progress:
 
-- Temporal Anomaly Detection Framework — implemented and validated; structural refactoring planned
+- Temporal Anomaly Detection Framework — implemented, structurally organized, and scientifically validated
 - Statistical–Clustering Hybrid Module — implemented and validated
 - Spatial Anomaly Verification Framework — planned for integration
 

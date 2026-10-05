@@ -16,7 +16,7 @@ if TYPE_CHECKING:
     from matplotlib.axes import Axes
     from matplotlib.figure import Figure
 
-from temporal_anomaly import TemporalAnomalyResult
+from .temporal_anomaly import TemporalAnomalyResult
 
 
 def plot_temporal_anomaly(

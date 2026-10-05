@@ -14,43 +14,30 @@ results.
 """
 
 from datetime import datetime, timedelta
-from pathlib import Path
 
 import numpy as np
 
-from tec_timeseries import extract_tec_timeseries
-from tec_timeseries_collection import (
+from src.temporal_anomaly.tec_timeseries import extract_tec_timeseries
+from src.temporal_anomaly.tec_timeseries_collection import (
     combine_tec_timeseries,
     select_calendar_day,
 )
-from temporal_anomaly import detect_temporal_anomalies
+from src.temporal_anomaly.temporal_anomaly import detect_temporal_anomalies
+
+from validation.temporal_anomaly.config import (
+    END_TIME,
+    LATITUDE,
+    LONGITUDE,
+    PROCESSED_DIR,
+    REFERENCE_DAYS,
+    START_TIME,
+    THRESHOLD_MULTIPLIER,
+)
 
 
 # ==========================================================
 # Afghanistan case configuration
 # ==========================================================
-
-LATITUDE = 33.020
-LONGITUDE = 69.464
-
-START_TIME = datetime(
-    2022,
-    5,
-    7,
-    0,
-    0,
-)
-
-END_TIME = datetime(
-    2022,
-    6,
-    21,
-    23,
-    0,
-)
-
-REFERENCE_DAYS = 15
-THRESHOLD_MULTIPLIER = 3.0
 
 EXPECTED_FILES = 46
 EXPECTED_INPUT_POINTS = 1104
@@ -78,8 +65,6 @@ EXPECTED_ANALYSIS_END = datetime(
     23,
     0,
 )
-
-PROCESSED_DIR = Path("processed")
 
 
 def date_range(start_date, end_date):

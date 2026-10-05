@@ -8,28 +8,21 @@ The validation checks temporal structure, source-precision equivalence,
 float32 representation, and machine-level numerical differences.
 """
 
-from datetime import datetime, timedelta
-
+from datetime import timedelta
 import numpy as np
+
+from validation.temporal_anomaly.config import (
+    LEGACY_TEC_FILE,
+    NEW_TEC_FILE,
+    START_TIME,
+)
 
 
 # ==========================================================
 # Afghanistan case configuration
 # ==========================================================
 
-START_TIME = datetime(
-    2022,
-    5,
-    7,
-    0,
-    0,
-)
-
 EXPECTED_LENGTH = 1104
-
-LEGACY_TEC_FILE = "old_tec.npz"
-NEW_TEC_FILE = "afghanistan_new_tec_validation.npz"
-
 SOURCE_PRECISION_DECIMALS = 1
 
 

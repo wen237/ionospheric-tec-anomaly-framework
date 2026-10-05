@@ -13,15 +13,20 @@ Each daily dataset contains 25 epochs from 00:00 UT of the target day to
 calendar date are retained.
 """
 
-from datetime import datetime, timedelta
-from pathlib import Path
-
+from datetime import timedelta
 import numpy as np
 
-from tec_timeseries import extract_tec_timeseries
-from tec_timeseries_collection import (
+from src.temporal_anomaly.tec_timeseries import extract_tec_timeseries
+from src.temporal_anomaly.tec_timeseries_collection import (
     combine_tec_timeseries,
     select_calendar_day,
+)
+from validation.temporal_anomaly.config import (
+    END_TIME,
+    LATITUDE,
+    LONGITUDE,
+    PROCESSED_DIR,
+    START_TIME,
 )
 
 
@@ -29,33 +34,12 @@ from tec_timeseries_collection import (
 # Afghanistan case configuration
 # ==========================================================
 
-LATITUDE = 33.020
-LONGITUDE = 69.464
-
-START_TIME = datetime(
-    2022,
-    5,
-    7,
-    0,
-    0,
-)
-
-END_TIME = datetime(
-    2022,
-    6,
-    21,
-    23,
-    0,
-)
-
 EXPECTED_DAYS = 46
 EXPECTED_RAW_EPOCHS = EXPECTED_DAYS * 25
 EXPECTED_SELECTED_EPOCHS = EXPECTED_DAYS * 24
 
 EXPECTED_GRID_LATITUDE = 32.5
 EXPECTED_GRID_LONGITUDE = 70.0
-
-PROCESSED_DIR = Path("processed")
 
 
 def date_range(start_date, end_date):

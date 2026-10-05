@@ -8,32 +8,28 @@ Both methods operate on the same 46-day TEC input. The validation compares
 observed TEC, quartiles, anomaly bounds, and anomaly classifications.
 """
 
-from datetime import datetime, timedelta
-from pathlib import Path
-
+from datetime import timedelta
 import numpy as np
 
-from temporal_anomaly import detect_temporal_anomalies
-
+from src.temporal_anomaly.temporal_anomaly import detect_temporal_anomalies
+from validation.temporal_anomaly.config import (
+    CASE_END_DATE,
+    LATITUDE,
+    LEGACY_GIM_DIR,
+    LONGITUDE,
+    REFERENCE_DAYS,
+    THRESHOLD_MULTIPLIER,
+)
 
 # ==========================================================
 # Afghanistan case configuration
 # ==========================================================
 
-END_TIME = datetime(2022, 6, 21)
-
 DISPLAY_DAYS = 31
-REFERENCE_DAYS = 15
-THRESHOLD_MULTIPLIER = 3.0
-
 TIME_STEPS_PER_DAY = 24
-
-LEGACY_GIM_DIR = Path(
-    r"I:/IRSL/CODEGIM_FIN_py"
-)
-
-LATITUDE = 33.020
-LONGITUDE = 69.464
+EXPECTED_POSITIVE = 37
+EXPECTED_NORMAL = 610
+EXPECTED_NEGATIVE = 97
 
 
 def load_legacy_tec() -> tuple[np.ndarray, np.ndarray]:
@@ -68,7 +64,7 @@ def load_legacy_tec() -> tuple[np.ndarray, np.ndarray]:
 
     for i in range(number_of_days):
         current_date = (
-            END_TIME
+            CASE_END_DATE
             - timedelta(days=i)
         )
 
@@ -101,7 +97,7 @@ def load_legacy_tec() -> tuple[np.ndarray, np.ndarray]:
     )
 
     start_time = (
-        END_TIME
+        CASE_END_DATE
         - timedelta(
             days=number_of_days - 1
         )
@@ -316,6 +312,21 @@ def main() -> None:
         np.count_nonzero(
             current["Anomaly"] == -1
         )
+    )
+
+    assert positive == EXPECTED_POSITIVE, (
+        "Unexpected number of positive anomalies: "
+        f"{positive} (expected {EXPECTED_POSITIVE})."
+    )
+
+    assert normal == EXPECTED_NORMAL, (
+        "Unexpected number of normal observations: "
+        f"{normal} (expected {EXPECTED_NORMAL})."
+    )
+
+    assert negative == EXPECTED_NEGATIVE, (
+        "Unexpected number of negative anomalies: "
+        f"{negative} (expected {EXPECTED_NEGATIVE})."
     )
 
     print(

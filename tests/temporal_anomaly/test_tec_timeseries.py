@@ -2,10 +2,10 @@ from datetime import datetime, timedelta
 
 import numpy as np
 
-from tec_timeseries import extract_tec_timeseries
+from src.temporal_anomaly.tec_timeseries import extract_tec_timeseries
 
 
-def main():
+def test_extract_tec_timeseries_nearest_grid_point():
     epochs = np.array(
         [
             datetime(2022, 1, 1) + timedelta(hours=i)
@@ -54,37 +54,34 @@ def main():
         longitude=5.2,
     )
 
-    print("Requested latitude :", result.requested_latitude)
-    print("Requested longitude:", result.requested_longitude)
+    assert result.requested_latitude == 7.4
+    assert result.requested_longitude == 5.2
+    assert result.grid_latitude == 7.5
+    assert result.grid_longitude == 5.0
+    assert result.latitude_index == 1
+    assert result.longitude_index == 1
 
-    print("Grid latitude      :", result.grid_latitude)
-    print("Grid longitude     :", result.grid_longitude)
+    np.testing.assert_array_equal(
+        result.tec,
+        np.array([5.0, 15.0, 25.0]),
+    )
 
-    print("Latitude index     :", result.latitude_index)
-    print("Longitude index    :", result.longitude_index)
 
-    print("TEC                :", result.tec)
-
-    print("\n=== Longitude wrap test ===")
-
-    longitudes_wrap = np.array(
+def test_extract_tec_timeseries_wraps_negative_longitude():
+    longitudes = np.array(
         [0.0, 90.0, 180.0, 270.0],
         dtype=float,
     )
 
-    tec_wrap = np.array(
+    tec = np.array(
         [
-            [
-                [10, 20, 30, 40],
-            ],
-            [
-                [11, 21, 31, 41],
-            ],
+            [[10, 20, 30, 40]],
+            [[11, 21, 31, 41]],
         ],
         dtype=float,
     )
 
-    epochs_wrap = np.array(
+    epochs = np.array(
         [
             datetime(2022, 1, 1, 0),
             datetime(2022, 1, 1, 1),
@@ -92,19 +89,18 @@ def main():
         dtype=object,
     )
 
-    result_wrap = extract_tec_timeseries(
-        tec=tec_wrap,
-        epochs=epochs_wrap,
+    result = extract_tec_timeseries(
+        tec=tec,
+        epochs=epochs,
         latitudes=np.array([0.0]),
-        longitudes=longitudes_wrap,
+        longitudes=longitudes,
         latitude=0.0,
         longitude=-90.0,
     )
 
-    print("Grid longitude :", result_wrap.grid_longitude)
-    print("TEC            :", result_wrap.tec)
+    assert result.grid_longitude == 270.0
 
-
-if __name__ == "__main__":
-    main()
-    
+    np.testing.assert_array_equal(
+        result.tec,
+        np.array([40.0, 41.0]),
+    )
