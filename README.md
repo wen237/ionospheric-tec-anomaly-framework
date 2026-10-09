@@ -10,9 +10,10 @@ The framework is organized into three main components:
 2. Statistical–Clustering Hybrid Module
 3. Spatial Anomaly Verification Framework
 
-The repository is being organized and validated module by module. The
-Temporal Anomaly Detection Framework and the Statistical–Clustering Hybrid
-Module are currently implemented and scientifically validated.
+The repository is being organized and validated module by module.
+All three scientific frameworks have been implemented and independently
+validated for the Afghanistan case. Their integration into a fully
+automated end-to-end workflow remains future work.
 
 ## Current Status
 
@@ -80,8 +81,27 @@ the legacy implementation used in the associated study.
 
 ### 3. Spatial Anomaly Verification Framework
 
-The Spatial Anomaly Verification Framework has not yet been integrated into
-the current repository structure.
+The Spatial Anomaly Verification Framework has been implemented and scientifically validated for the Afghanistan case.
+
+It includes:
+
+- GIM data loading and preprocessing
+- spatial quartile-based anomaly detection
+- positive and negative anomaly occurrence calculation
+- spatial grid orientation normalization
+- synthetic software tests
+- legacy numerical-equivalence validation
+- Afghanistan case production-only reproduction
+
+The validated Afghanistan case reproduces the expected spatial anomaly results:
+
+- Maximum positive anomaly ratio: 10.0%
+- Maximum negative anomaly ratio: 85.0%
+- Maximum negative anomaly location: 30.0°N, 70.0°E
+
+The production implementation reproduces all four spatial anomaly matrices with exact numerical agreement against the legacy reference.
+
+The spatial verification window is currently specified explicitly rather than automatically selected from clustering results.
 
 ## Repository Structure
 
@@ -110,8 +130,14 @@ src/
         pipeline.py
         reproducibility.py
 
+    spatial_verification/
+        __init__.py
+        gim_loader.py
+        spatial_anomaly.py
+        spatial_grid.py
+
 tests/
-    Statistical, clustering, regression, and temporal-anomaly tests.
+    Unit, integration, and regression tests for the scientific frameworks.
 
     temporal_anomaly/
         Unit tests for the Temporal Anomaly Detection Framework.
@@ -119,6 +145,10 @@ tests/
     statistical_clustering/
         Unit and integration tests for the Statistical–Clustering
         Hybrid Module.
+
+    spatial_verification/
+        Unit tests for spatial anomaly computation, grid orientation,
+        GIM loading, and temporal alignment.
 
     regression/
         Fixed Afghanistan regression references and tests.
@@ -133,6 +163,10 @@ validation/
     statistical_clustering/
         Afghanistan real-data validation for the statistical and
         clustering workflows.
+
+    spatial_verification/
+        Afghanistan GIM loading equivalence and production-only
+        spatial anomaly reproduction.
 
     legacy/
         Legacy reference implementations retained for numerical-
@@ -167,13 +201,13 @@ python -m pytest tests/statistical_clustering tests/regression -q
 These tests include software-level unit tests, integration tests, and a
 fixed Afghanistan regression test.
 
-The Temporal Anomaly Detection Framework and the Statistical–Clustering
-Hybrid Module are both covered by the repository test suite.
+All three scientific frameworks are covered by the repository test suite.
 
 Run the complete software test suite with:
 
 ```bash
 python -m pytest tests -q
+```
 
 ## Scientific Validation
 
@@ -254,12 +288,10 @@ The repository is under active development.
 Current progress:
 
 - Temporal Anomaly Detection Framework — implemented, structurally organized, and scientifically validated
-- Statistical–Clustering Hybrid Module — implemented and validated
-- Spatial Anomaly Verification Framework — planned for integration
+- Statistical–Clustering Hybrid Module — implemented and scientifically validated
+- Spatial Anomaly Verification Framework — implemented and scientifically validated for the Afghanistan case
 
-The current repository contains the individual framework components but
-does not yet provide a fully coupled end-to-end pipeline across all three
-frameworks.
+The three scientific frameworks have been independently implemented and validated. However, the repository does not yet provide a fully coupled end-to-end pipeline across all three frameworks.
 
 ## License
 
