@@ -10,10 +10,18 @@ The framework is organized into three main components:
 2. Statistical–Clustering Hybrid Module
 3. Spatial Anomaly Verification Framework
 
-The repository is being organized and validated module by module.
-All three scientific frameworks have been implemented and independently
-validated for the Afghanistan case. Their integration into a fully
-automated end-to-end workflow remains future work.
+The three scientific frameworks have been implemented and independently
+validated for the Afghanistan case.
+
+The repository also provides a staged research workflow for transferring
+prepared research artifacts into spatial anomaly verification. Stage 1
+produces a Preparation Manifest, while Stage 2 accepts a researcher-selected
+UTC window and executes spatial anomaly analysis, visualization, and
+structured summary export.
+
+Stage 2 can be executed through either the Python API or a command-line
+interface (CLI). Temporal-cluster selection and earthquake-related
+interpretation remain researcher-controlled rather than automated.
 
 ## Current Status
 
@@ -136,6 +144,16 @@ src/
         spatial_anomaly.py
         spatial_grid.py
 
+    workflow/
+        preparation_manifest.py
+        explicit_window.py
+        spatial_verification_workflow.py
+        spatial_plot_export.py
+        spatial_summary.py
+        spatial_summary_export.py
+        stage2_runner.py
+        stage2_cli.py
+
 tests/
     Unit, integration, and regression tests for the scientific frameworks.
 
@@ -149,6 +167,10 @@ tests/
     spatial_verification/
         Unit tests for spatial anomaly computation, grid orientation,
         GIM loading, and temporal alignment.
+
+    workflow/
+        Unit, integration, regression, and CLI end-to-end tests
+        for the staged research workflow.
 
     regression/
         Fixed Afghanistan regression references and tests.
@@ -208,6 +230,166 @@ Run the complete software test suite with:
 ```bash
 python -m pytest tests -q
 ```
+
+### Stage 2 Workflow and CLI Tests
+
+The Stage 2 workflow is covered by unit tests, synthetic integration
+tests, failure-injection tests, and command-line integration tests.
+
+Run the CLI unit tests with:
+
+```bash
+python -m pytest tests/workflow/test_stage2_cli.py -v
+```
+
+Run the CLI end-to-end integration tests with:
+
+```bash
+python -m pytest tests/workflow/test_stage2_cli_integration.py -v
+```
+
+Run the complete regression suite with:
+
+```bash
+python -m pytest tests/ -q
+```
+
+The current regression baseline is 412 passing tests.
+
+The CLI integration tests use synthetic GIM datasets and verify actual
+PNG and JSON generation, explicit UTC window handling, output protection,
+Stage 1 artifact preservation, and consistency between CLI and Python API
+execution.
+
+## Stage 2 Research Workflow
+
+The Stage 2 workflow provides a reproducible execution interface for
+spatial ionospheric TEC anomaly verification.
+
+It consumes an existing Stage 1 Preparation Manifest and a researcher-
+selected UTC verification window. It then performs spatial anomaly
+analysis and exports visual and structured research artifacts.
+
+### Workflow Overview
+
+The execution sequence is:
+
+1. Load the Stage 1 Preparation Manifest.
+2. Validate the explicitly selected UTC verification window.
+3. Load and process the required GIM data.
+4. Compute positive and negative spatial anomaly occurrence ratios.
+5. Generate positive and negative spatial anomaly maps.
+6. Export a structured Spatial Summary JSON.
+
+The CLI delegates scientific computations to the existing Stage 2
+orchestrator. It does not implement separate anomaly calculations.
+
+### Command-Line Interface
+
+Display the available CLI arguments:
+
+```bash
+python -m src.workflow.stage2_cli --help
+```
+
+Example execution:
+
+```bash
+python -m src.workflow.stage2_cli \
+    --manifest /path/to/case/preparation_manifest.json \
+    --dataset-dir /path/to/gim_dataset_prefix \
+    --start-time 2022-05-28T06:00:00Z \
+    --end-time 2022-05-29T05:00:00Z \
+    --latitude 33.020 \
+    --longitude 69.464 \
+    --magnitude 6.0 \
+    --reference-days 3 \
+    --k 3.0
+```
+
+For Windows PowerShell, use a backtick (`` ` ``) instead of a
+backslash (`\`) for command continuation, or enter the command
+on a single line.
+
+The paths above are placeholders and must be replaced with paths
+matching the local research environment and GIM loader configuration.
+
+The start and end times must be explicitly supplied by the researcher.
+The workflow does not automatically select a verification window from
+temporal clustering results.
+
+### CLI Arguments
+
+| Argument | Required | Description |
+| --- | --- | --- |
+| `--manifest` | Yes | Stage 1 Preparation Manifest JSON path |
+| `--dataset-dir` | Yes | GIM dataset directory or prefix expected by the loader |
+| `--start-time` | Yes | Explicit UTC verification start time |
+| `--end-time` | Yes | Explicit UTC verification end time |
+| `--latitude` | Yes | Earthquake epicenter latitude |
+| `--longitude` | Yes | Earthquake epicenter longitude |
+| `--magnitude` | Yes | Earthquake magnitude |
+| `--reference-days` | No | Reference days; default: 15 |
+| `--k` | No | Quartile threshold multiplier; default: 3.0 |
+| `--output-dir` | No | Output directory; default: `spatial/` under the manifest directory |
+
+### Output Artifacts
+
+A successful Stage 2 execution produces three artifacts:
+
+- Positive spatial anomaly map (PNG).
+- Negative spatial anomaly map (PNG).
+- Spatial Summary (JSON).
+
+The filenames contain the case identifier and the selected UTC
+verification window.
+
+The Spatial Summary records the analysis configuration, spatial anomaly
+results, artifact references, and verification metadata.
+
+The verification method is recorded as `visual_inspection`, with
+`automatic_decision` set to `null`.
+
+Spatial anomaly occurrence ratios are quantitative analysis results.
+They must not be interpreted as automatic confirmation of an
+earthquake-related ionospheric precursor.
+
+### CLI Exit Codes
+
+| Exit code | Meaning |
+| --- | --- |
+| `0` | Successful execution |
+| `1` | Scientific workflow or filesystem execution failure |
+| `2` | Invalid command-line arguments or research inputs |
+| `3` | Existing output artifact conflict |
+
+### Research Integrity and Execution Limitations
+
+The Stage 2 V1 workflow follows these principles:
+
+- The UTC verification window must be explicitly selected by the researcher.
+- Temporal clustering results are not automatically converted into spatial verification windows.
+- Existing output artifacts are not overwritten.
+- Stage 1 artifacts are preserved during Stage 2 execution.
+- Spatial verification outputs are intended for researcher inspection.
+- No automatic earthquake precursor decision is produced.
+- Execution assumes a single writer for each research case and output window.
+
+Artifact export includes filesystem failure handling and cleanup
+mechanisms. However, the current implementation does not guarantee
+a fully atomic transaction across all PNG and JSON outputs, and it
+does not provide multi-process concurrency protection.
+
+### Synthetic Testing and Research Data
+
+Automated CLI integration tests use synthetic GIM data to verify
+software behavior and numerical reproducibility.
+
+These tests are distinct from the Afghanistan real-data scientific
+validation described elsewhere in this README.
+
+Real GIM datasets and local research artifacts are not included
+in the repository.
 
 ## Scientific Validation
 
@@ -281,17 +463,46 @@ The reproducibility utilities are provided in:
 src/statistical_clustering/reproducibility.py
 ```
 
+### Stage 2 Reproducibility
+
+Stage 2 reproducibility is supported through explicit UTC window
+selection, validated analysis parameters, structured spatial summaries,
+and deterministic output naming.
+
+The workflow maintains a separation between numerical anomaly
+analysis and researcher interpretation.
+
+Synthetic end-to-end integration tests verify that CLI execution and
+direct Python API execution produce equivalent Spatial Summary results
+when supplied with the same input data and analysis parameters.
+
+These software reproducibility tests complement, rather than replace,
+the real-data scientific validation of the Afghanistan case.
+
 ## Development Status
 
 The repository is under active development.
 
 Current progress:
 
-- Temporal Anomaly Detection Framework — implemented, structurally organized, and scientifically validated
-- Statistical–Clustering Hybrid Module — implemented and scientifically validated
-- Spatial Anomaly Verification Framework — implemented and scientifically validated for the Afghanistan case
+- Temporal Anomaly Detection Framework — implemented and scientifically validated.
+- Statistical–Clustering Hybrid Module — implemented and scientifically validated.
+- Spatial Anomaly Verification Framework — implemented and scientifically validated for the Afghanistan case.
+- Stage 1 Preparation Manifest — implemented and tested.
+- Stage 2 Spatial Verification Workflow — implemented and tested.
+- Stage 2 CLI — implemented and validated through synthetic end-to-end integration tests.
 
-The three scientific frameworks have been independently implemented and validated. However, the repository does not yet provide a fully coupled end-to-end pipeline across all three frameworks.
+The current regression baseline consists of 412 passing tests.
+
+The staged workflow supports reproducible spatial verification using
+researcher-selected UTC windows and structured research artifacts.
+
+A fully automated pipeline coupling temporal anomaly detection,
+statistical clustering, verification-window selection, and scientific
+interpretation is not yet provided.
+
+Future development will focus on extending workflow integration while
+preserving scientific reproducibility and researcher control.
 
 ## License
 

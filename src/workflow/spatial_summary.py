@@ -7,6 +7,8 @@ from typing import Any
 import json
 import math
 import re
+import os
+import tempfile
 
 
 SPATIAL_SUMMARY_SCHEMA_VERSION = 1
@@ -334,23 +336,77 @@ class SpatialSummary:
 
 
 def save_spatial_summary(summary: SpatialSummary, path: Path) -> None:
+    """Atomically publish a validated JSON summary without overwrite.
+
+    A complete JSON document is written to a temporary file in the
+    destination directory. A hard link then publishes it under the
+    final filename, failing if that filename already exists.
+
+    Requires filesystem support for hard links. This does not provide
+    a multi-file transaction or protection against power loss.
+    """
+
     if not isinstance(summary, SpatialSummary):
         raise TypeError("summary must be a SpatialSummary.")
+
     if not isinstance(path, Path):
         raise TypeError("path must be a Path.")
 
-    # Revalidate in case mutable nested dictionaries were modified.
-    summary = SpatialSummary.from_dict(summary.to_dict())
+    # Revalidate mutable nested dictionaries before serialization.
+    validated = SpatialSummary.from_dict(summary.to_dict())
+
+    # Serialize before creating any output file.
+    content = json.dumps(
+        validated.to_dict(),
+        indent=2,
+        ensure_ascii=False,
+        allow_nan=False,
+    )
 
     path.parent.mkdir(parents=True, exist_ok=True)
-    with path.open("w", encoding="utf-8") as file:
-        json.dump(
-            summary.to_dict(),
-            file,
-            indent=2,
-            ensure_ascii=False,
-            allow_nan=False,
+
+    # Fail early for an existing destination.
+    # The hard-link operation below remains the final protection
+    # against a destination appearing after this check.
+    if path.exists() or path.is_symlink():
+        raise FileExistsError(
+            f"Spatial summary already exists: {path}"
         )
+
+    temporary_path = None
+
+    try:
+        # Create the temporary file in the destination directory,
+        # keeping publication on the same filesystem.
+        descriptor, temporary_name = tempfile.mkstemp(
+            prefix=f".{path.stem}_",
+            suffix=".tmp",
+            dir=path.parent,
+        )
+        temporary_path = Path(temporary_name)
+
+        # fdopen owns and closes the descriptor.
+        with os.fdopen(descriptor, "w", encoding="utf-8") as file:
+            file.write(content)
+            file.flush()
+            os.fsync(file.fileno())
+
+        # Publish only the completed file.
+        #
+        # Unlike os.replace(), os.link() does not overwrite
+        # an existing destination. On a filesystem supporting
+        # hard links, this creates the final directory entry
+        # atomically.
+        os.link(temporary_path, path)
+
+    finally:
+        # Once linked, removing the temporary name does not
+        # remove the published JSON.
+        #
+        # On an exception before linking, only the temporary
+        # file is removed.
+        if temporary_path is not None:
+            temporary_path.unlink(missing_ok=True)
 
 
 def load_spatial_summary(path: Path) -> SpatialSummary:

@@ -3,7 +3,7 @@
 from datetime import datetime, timezone
 import copy
 import json
-
+from pathlib import Path
 import pytest
 
 from src.workflow.spatial_summary import (
@@ -204,3 +204,129 @@ def test_unknown_schema_field_rejected():
 
     with pytest.raises(ValueError, match="fields"):
         SpatialSummary.from_dict(data)
+
+
+# ============================================================
+# S2-5c-3a: Atomic JSON Write Tests
+# ============================================================
+
+def test_atomic_save_creates_valid_json(tmp_path):
+    """A successful save publishes a complete JSON document."""
+
+    summary = make_summary()
+    path = tmp_path / "spatial" / "summary.json"
+
+    save_spatial_summary(summary, path)
+
+    assert path.is_file()
+    assert load_spatial_summary(path) == summary
+
+    assert list(path.parent.glob("*.tmp")) == []
+
+
+def test_atomic_save_rejects_existing_destination(tmp_path):
+    """An existing JSON must never be overwritten."""
+
+    path = tmp_path / "summary.json"
+    original = b"existing-scientific-result"
+    path.write_bytes(original)
+
+    with pytest.raises(FileExistsError):
+        save_spatial_summary(make_summary(), path)
+
+    assert path.read_bytes() == original
+    assert list(tmp_path.glob("*.tmp")) == []
+
+
+def test_atomic_save_rejects_invalid_mutated_summary(tmp_path):
+    """Validation failure must not create an output file."""
+
+    summary = make_summary()
+
+    summary.spatial_anomalies["positive"][
+        "maximum_ratio_percent"
+    ] = float("nan")
+
+    path = tmp_path / "summary.json"
+
+    with pytest.raises(ValueError):
+        save_spatial_summary(summary, path)
+
+    assert not path.exists()
+    assert list(tmp_path.glob("*.tmp")) == []
+
+
+def test_atomic_save_link_failure_cleans_temp(
+    tmp_path,
+    monkeypatch,
+):
+    """A failed publish must not leave partial JSON or temp files."""
+
+    import src.workflow.spatial_summary as summary_module
+
+    path = tmp_path / "summary.json"
+
+    def failing_link(source, destination):
+        raise OSError("Simulated hard-link failure")
+
+    monkeypatch.setattr(
+        summary_module.os,
+        "link",
+        failing_link,
+    )
+
+    with pytest.raises(OSError, match="hard-link failure"):
+        save_spatial_summary(make_summary(), path)
+
+    assert not path.exists()
+    assert list(tmp_path.glob("*.tmp")) == []
+
+
+def test_atomic_save_race_preserves_existing_file(
+    tmp_path,
+    monkeypatch,
+):
+    """A destination appearing during publication is preserved."""
+
+    import src.workflow.spatial_summary as summary_module
+
+    path = tmp_path / "summary.json"
+    original_link = summary_module.os.link
+
+    def competing_link(source, destination):
+        # Simulate another writer creating the final path
+        # after the initial existence check.
+        Path(destination).write_bytes(b"another-writer-result")
+
+        # The real link operation must refuse to overwrite it.
+        return original_link(source, destination)
+
+    monkeypatch.setattr(
+        summary_module.os,
+        "link",
+        competing_link,
+    )
+
+    with pytest.raises(FileExistsError):
+        save_spatial_summary(make_summary(), path)
+
+    assert path.read_bytes() == b"another-writer-result"
+    assert list(tmp_path.glob("*.tmp")) == []
+
+
+def test_atomic_save_leaves_no_temporary_file(
+    tmp_path,
+):
+    """Successful publication must remove its temporary name."""
+
+    path = tmp_path / "spatial" / "summary.json"
+
+    save_spatial_summary(make_summary(), path)
+
+    assert path.is_file()
+
+    temporary_files = list(
+        path.parent.glob(f".{path.stem}_*.tmp")
+    )
+
+    assert temporary_files == []
