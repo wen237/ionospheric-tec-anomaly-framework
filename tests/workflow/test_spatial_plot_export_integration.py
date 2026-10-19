@@ -319,3 +319,210 @@ def test_e2e_scientific_arrays_remain_unchanged(
     assert spatial.negative_ratio[
         NEGATIVE_INDEX
     ] == pytest.approx(100.0 / 24.0)
+
+
+# ============================================================
+# S2-4d: Spatial Summary End-to-End Handoff Tests
+# ============================================================
+
+from src.workflow.spatial_summary import (
+    load_spatial_summary,
+)
+from src.workflow.spatial_summary_export import (
+    export_spatial_summary,
+)
+
+
+@pytest.fixture(scope="module")
+def spatial_handoff_e2e(spatial_export_e2e):
+    """Extend the existing real PNG integration fixture.
+
+    Executes:
+        Synthetic GIM
+        -> Framework D
+        -> Positive/Negative PNG
+        -> Spatial Summary JSON
+        -> Reloaded SpatialSummary
+    """
+
+    workflow = spatial_export_e2e["workflow"]
+    plots = spatial_export_e2e["export"]
+
+    summary_path = export_spatial_summary(
+        workflow,
+        plots,
+        epicenter_latitude=33.020,
+        epicenter_longitude=69.464,
+        magnitude=6.0,
+    )
+
+    loaded_summary = load_spatial_summary(summary_path)
+
+    return {
+        **spatial_export_e2e,
+        "summary_path": summary_path,
+        "summary": loaded_summary,
+    }
+
+
+def test_handoff_summary_json_exists(spatial_handoff_e2e):
+    """The complete workflow must produce a JSON file."""
+
+    summary_path = spatial_handoff_e2e["summary_path"]
+
+    assert summary_path.is_file()
+    assert summary_path.stat().st_size > 0
+    assert summary_path.suffix == ".json"
+
+
+def test_handoff_metadata_matches_workflow(spatial_handoff_e2e):
+    """Summary metadata must match the executed workflow."""
+
+    workflow = spatial_handoff_e2e["workflow"]
+    summary = spatial_handoff_e2e["summary"]
+
+    assert summary.schema_version == 1
+
+    assert summary.case_id == (
+        workflow.preparation_manifest.case_id
+    )
+
+    assert summary.start_time == workflow.window.start_time
+    assert summary.end_time == workflow.window.end_time
+
+    assert summary.window_steps == (
+        workflow.spatial_result.window_steps
+    )
+
+    assert summary.reference_days == workflow.reference_days
+    assert summary.k == workflow.k
+
+    assert summary.epicenter_latitude == 33.020
+    assert summary.epicenter_longitude == 69.464
+    assert summary.magnitude == 6.0
+
+
+def test_handoff_maximum_ratios_match_framework_d(
+    spatial_handoff_e2e,
+):
+    """Summary maxima must match the actual scientific arrays."""
+
+    workflow = spatial_handoff_e2e["workflow"]
+    summary = spatial_handoff_e2e["summary"]
+
+    spatial = workflow.spatial_result
+
+    positive_maximum = float(
+        np.max(spatial.positive_ratio)
+    )
+    negative_maximum = float(
+        np.max(spatial.negative_ratio)
+    )
+
+    assert summary.spatial_anomalies["positive"][
+        "maximum_ratio_percent"
+    ] == pytest.approx(positive_maximum)
+
+    assert summary.spatial_anomalies["negative"][
+        "maximum_ratio_percent"
+    ] == pytest.approx(negative_maximum)
+
+    assert positive_maximum == pytest.approx(100.0 / 24.0)
+    assert negative_maximum == pytest.approx(100.0 / 24.0)
+
+
+def test_handoff_geographic_peak_coordinates(
+    spatial_handoff_e2e,
+):
+    """Verify raw GIM indices become correct geographic points."""
+
+    summary = spatial_handoff_e2e["summary"]
+
+    positive_points = summary.spatial_anomalies["positive"][
+        "maximum_grid_points"
+    ]
+    negative_points = summary.spatial_anomalies["negative"][
+        "maximum_grid_points"
+    ]
+
+    # Raw GIM (20, 50) -> 37.5 N, 70 E
+    assert positive_points == [
+        {
+            "latitude": 37.5,
+            "longitude": 70.0,
+        }
+    ]
+
+    # Raw GIM (40, 25) -> 12.5 S, 55 W
+    assert negative_points == [
+        {
+            "latitude": -12.5,
+            "longitude": -55.0,
+        }
+    ]
+
+
+def test_handoff_artifact_paths_resolve(
+    spatial_handoff_e2e,
+):
+    """Every referenced artifact must resolve within the case root."""
+
+    workflow = spatial_handoff_e2e["workflow"]
+    plots = spatial_handoff_e2e["export"]
+    summary = spatial_handoff_e2e["summary"]
+
+    root = (
+        workflow.preparation_manifest_path.resolve().parent
+    )
+
+    assert (
+        root / summary.preparation_manifest
+    ).resolve() == (
+        workflow.preparation_manifest_path.resolve()
+    )
+
+    assert (
+        root / summary.positive_plot
+    ).resolve() == plots.positive_plot.resolve()
+
+    assert (
+        root / summary.negative_plot
+    ).resolve() == plots.negative_plot.resolve()
+
+    for relative_path in (
+        summary.preparation_manifest,
+        summary.positive_plot,
+        summary.negative_plot,
+    ):
+        resolved = (root / relative_path).resolve()
+
+        assert resolved.is_file()
+        assert resolved.is_relative_to(root)
+
+
+def test_handoff_no_automatic_verification(
+    spatial_handoff_e2e,
+):
+    """The V1 summary must not make an earthquake decision."""
+
+    summary = spatial_handoff_e2e["summary"]
+    data = summary.to_dict()
+
+    assert data["window"]["selection_mode"] == "explicit"
+
+    assert data["verification"] == {
+        "method": "visual_inspection",
+        "automatic_decision": None,
+    }
+
+
+def test_handoff_stage_one_artifacts_unchanged(
+    spatial_handoff_e2e,
+):
+    """The full Stage 2 handoff must preserve Stage 1 files."""
+
+    before = spatial_handoff_e2e["stage_one_before"]
+
+    for path in spatial_handoff_e2e["stage_one_files"]:
+        assert path.is_file()
+        assert path.read_bytes() == before[path]
