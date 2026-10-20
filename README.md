@@ -23,6 +23,10 @@ Stage 2 can be executed through either the Python API or a command-line
 interface (CLI). Temporal-cluster selection and earthquake-related
 interpretation remain researcher-controlled rather than automated.
 
+The repository also includes Modern CODE GIM data adapters and a separate
+Legacy–Modern validation suite for checking numerical consistency without
+changing the existing scientific algorithms.
+
 ## Current Status
 
 ### 1. Temporal Anomaly Detection Framework
@@ -111,10 +115,31 @@ The production implementation reproduces all four spatial anomaly matrices with 
 
 The spatial verification window is currently specified explicitly rather than automatically selected from clustering results.
 
+### 4. Modern GIM Data Integration and Validation
+
+Modern CODE GIM data interfaces have been added alongside the existing Legacy
+loaders. They support daily TEC loading, UTC time-series assembly, and input
+adaptation for Framework A, Framework B+C, and Framework D.
+
+The Legacy–Modern validation suite compares the two processing paths using
+paired CODE GIM datasets. For the selected January 1–16, 2022 interval, the
+validation confirmed identical TEC values, missing-value masks, and hourly
+alignment, as well as equivalent selected Framework A, B+C, and D outputs.
+The 25th daily map is excluded; only 24 hourly epochs per UTC day are used.
+
+This establishes numerical consistency for the tested configuration, not full
+reproduction of the historical earthquake studies. See
+[Legacy–Modern GIM Validation](docs/validation/gim_legacy_modern.md).
+
 ## Repository Structure
 
 ```text
 src/
+    data/
+        modern_gim_loader.py
+        modern_gim_series.py
+        modern_gim_bridge.py
+
     temporal_anomaly/
         __init__.py
         tec_timeseries.py
@@ -153,9 +178,19 @@ src/
         spatial_summary_export.py
         stage2_runner.py
         stage2_cli.py
+        modern_temporal_input_adapter.py
+        modern_historical_input_adapter.py
+        modern_spatial_input_adapter.py
+
+scripts/
+    validation/gim/
+        Legacy–Modern comparison and integrated real-data validation CLIs.
 
 tests/
     Unit, integration, and regression tests for the scientific frameworks.
+
+    integration/gim/
+        Automated tests for the Legacy–Modern validation utilities.
 
     temporal_anomaly/
         Unit tests for the Temporal Anomaly Detection Framework.
@@ -174,6 +209,10 @@ tests/
 
     regression/
         Fixed Afghanistan regression references and tests.
+
+docs/
+    validation/gim_legacy_modern.md
+        Modern GIM equivalence validation procedure, results, and limits.
 
 validation/
     Case-specific scientific validation and legacy-equivalence checks.
@@ -254,12 +293,32 @@ Run the complete regression suite with:
 python -m pytest tests/ -q
 ```
 
-The current regression baseline is 412 passing tests.
+The test suite includes the Modern GIM adapters and Legacy–Modern validation
+utilities. Run `python -m pytest -q` to obtain the current test count; the
+previously documented 412-test baseline predates these additions.
 
 The CLI integration tests use synthetic GIM datasets and verify actual
 PNG and JSON generation, explicit UTC window handling, output protection,
 Stage 1 artifact preservation, and consistency between CLI and Python API
 execution.
+
+### Legacy–Modern GIM Validation Tests
+
+Run the validation utility tests from the repository root:
+
+```bash
+python -m pytest -q tests/integration/gim
+```
+
+The real-data integration runner is available as:
+
+```bash
+python -m scripts.validation.gim.run_integrated_validation --help
+```
+
+Real-data comparisons require separately supplied Legacy and Modern CODE GIM
+files. See [validation instructions](docs/validation/gim_legacy_modern.md)
+for configuration, tested results, and limitations.
 
 ## Stage 2 Research Workflow
 
@@ -419,6 +478,18 @@ validation/legacy/statistical_clustering/
 These legacy scripts are reference implementations for scientific
 validation and are not the production interface of the framework.
 
+### Legacy–Modern CODE GIM Equivalence
+
+An additional validation suite is maintained in `scripts/validation/gim/`.
+It verifies selected Legacy/Modern CODE GIM inputs and Framework A, B+C,
+and D outputs, independently of the existing Afghanistan reproduction checks.
+The documented January 1–16, 2022 integration run passed after the repository
+reorganization. This does not establish multi-event statistical or clustering
+equivalence, or full earthquake-case reproduction.
+
+Detailed methods and commands are documented in
+[Legacy–Modern GIM Validation](docs/validation/gim_legacy_modern.md).
+
 ## External Validation Data
 
 Research data and local validation artifacts are not distributed directly
@@ -491,8 +562,10 @@ Current progress:
 - Stage 1 Preparation Manifest — implemented and tested.
 - Stage 2 Spatial Verification Workflow — implemented and tested.
 - Stage 2 CLI — implemented and validated through synthetic end-to-end integration tests.
+- Modern CODE GIM adapters — implemented and tested for Framework A, B+C, and D inputs.
+- Legacy–Modern CODE GIM validation suite — selected 16-day real-data integration validation passed.
 
-The current regression baseline consists of 412 passing tests.
+The full test count should be refreshed from the latest `python -m pytest -q` run before release.
 
 The staged workflow supports reproducible spatial verification using
 researcher-selected UTC windows and structured research artifacts.
