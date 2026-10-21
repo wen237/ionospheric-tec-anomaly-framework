@@ -49,6 +49,8 @@ def _maximum_anomaly(
     ratio: np.ndarray,
     latitudes: np.ndarray,
     longitudes: np.ndarray,
+    *,
+    grid_orientation: str = "legacy",
 ) -> dict:
     """Find all maximum anomaly cells in geographic coordinates."""
 
@@ -82,7 +84,13 @@ def _maximum_anomaly(
         raise ValueError("Unexpected GIM longitude coordinates.")
 
     # Match the same orientation used by spatial_plot.py.
-    oriented = orient_gim_grid(ratio)
+    # Legacy arrays need a latitude flip; Modern arrays do not.
+    if grid_orientation == "legacy":
+        oriented = orient_gim_grid(ratio)
+    elif grid_orientation == "canonical":
+        oriented = ratio
+    else:
+        raise ValueError("grid_orientation must be 'legacy' or 'canonical'")
 
     maximum = float(np.max(oriented))
 
@@ -118,6 +126,7 @@ def build_spatial_summary(
     epicenter_latitude: float,
     epicenter_longitude: float,
     magnitude: float,
+    grid_orientation: str = "legacy",
 ) -> SpatialSummary:
     """Build a validated summary without writing any files."""
 
@@ -188,11 +197,13 @@ def build_spatial_summary(
             spatial.positive_ratio,
             spatial.latitudes,
             spatial.longitudes,
+            grid_orientation=grid_orientation,
         ),
         "negative": _maximum_anomaly(
             spatial.negative_ratio,
             spatial.latitudes,
             spatial.longitudes,
+            grid_orientation=grid_orientation,
         ),
     }
 
@@ -221,6 +232,7 @@ def export_spatial_summary(
     epicenter_latitude: float,
     epicenter_longitude: float,
     magnitude: float,
+    grid_orientation: str = "legacy",
 ) -> Path:
     """Export one summary JSON beside the spatial PNG files."""
 
@@ -230,6 +242,7 @@ def export_spatial_summary(
         epicenter_latitude=epicenter_latitude,
         epicenter_longitude=epicenter_longitude,
         magnitude=magnitude,
+        grid_orientation=grid_orientation,
     )
 
     window_id = (

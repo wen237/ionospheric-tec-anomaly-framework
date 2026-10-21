@@ -47,6 +47,8 @@ def create_spatial_anomaly_figure(
     epicenter_latitude: float,
     epicenter_longitude: float,
     magnitude: float,
+    grid_orientation: str = "legacy",
+    show_boundaries: bool = False,
 ) -> Figure:
     """Create a paper-style spatial anomaly figure.
 
@@ -122,9 +124,14 @@ def create_spatial_anomaly_figure(
         else result.negative_ratio
     )
 
-    oriented_ratio = orient_gim_grid(
-        np.asarray(raw_ratio, dtype=float)
-    )
+    # Legacy spatial arrays are north-to-south; Modern GIM arrays are
+    # already south-to-north. Never flip Modern data a second time.
+    if grid_orientation == "legacy":
+        oriented_ratio = orient_gim_grid(np.asarray(raw_ratio, dtype=float))
+    elif grid_orientation == "canonical":
+        oriented_ratio = np.asarray(raw_ratio, dtype=float)
+    else:
+        raise ValueError("grid_orientation must be 'legacy' or 'canonical'")
 
     if not np.all(np.isfinite(oriented_ratio)):
         raise ValueError("Spatial ratios must be finite.")
@@ -136,7 +143,18 @@ def create_spatial_anomaly_figure(
 
     fig = Figure(figsize=(14, 7), constrained_layout=True)
     FigureCanvasAgg(fig)
-    ax = fig.add_subplot(111)
+    if show_boundaries:
+        try:
+            import cartopy.crs as ccrs
+            import cartopy.feature as cfeature
+        except ImportError as exc:
+            raise ImportError(
+                "Coastlines and borders require Cartopy: pip install cartopy"
+            ) from exc
+        projection = ccrs.PlateCarree()
+        ax = fig.add_subplot(111, projection=projection)
+    else:
+        ax = fig.add_subplot(111)
 
     # The grid coordinates denote cell centers.
     # The legacy GIM grid spacing is 5 degrees longitude
@@ -150,10 +168,19 @@ def create_spatial_anomaly_figure(
         vmin=0.0,
         vmax=color_maximum,
         aspect="auto",
+        zorder=1,
     )
 
-    ax.set_xlim(-180.0, 180.0)
-    ax.set_ylim(-87.5, 87.5)
+    # Display full cell edges rather than cutting the first/last cells.
+    ax.set_xlim(-182.5, 182.5)
+    ax.set_ylim(-88.75, 88.75)
+    if show_boundaries:
+        # Cartopy may download Natural Earth geometries on first use.
+        ax.coastlines(resolution="110m", linewidth=0.7, color="black", zorder=3)
+        ax.add_feature(
+            cfeature.BORDERS, linestyle="--", linewidth=0.5,
+            edgecolor="black", zorder=3,
+        )
     ax.set_xticks(np.arange(-180, 181, 30))
     ax.set_yticks(np.arange(-75, 76, 25))
     ax.grid(
@@ -245,6 +272,8 @@ def save_spatial_anomaly_plot(
     epicenter_latitude: float,
     epicenter_longitude: float,
     magnitude: float,
+    grid_orientation: str = "legacy",
+    show_boundaries: bool = False,
 ) -> Path:
     """Save a paper-style spatial anomaly PNG."""
     if not isinstance(output_path, Path):
@@ -260,6 +289,8 @@ def save_spatial_anomaly_plot(
         epicenter_latitude=epicenter_latitude,
         epicenter_longitude=epicenter_longitude,
         magnitude=magnitude,
+        grid_orientation=grid_orientation,
+        show_boundaries=show_boundaries,
     )
 
     try:
