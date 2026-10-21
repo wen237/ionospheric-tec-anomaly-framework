@@ -13,11 +13,12 @@ The framework is organized into three main components:
 The three scientific frameworks have been implemented and independently
 validated for the Afghanistan case.
 
-The repository also provides a staged research workflow for transferring
-prepared research artifacts into spatial anomaly verification. Stage 1
-produces a Preparation Manifest, while Stage 2 accepts a researcher-selected
-UTC window and executes spatial anomaly analysis, visualization, and
-structured summary export.
+The repository also provides staged research workflow components for
+transferring prepared scientific artifacts into spatial anomaly verification.
+The Stage 1 Preparation Manifest records references to temporal analysis and
+clustering outputs, while Stage 2 accepts a researcher-selected UTC window
+and executes spatial anomaly analysis, visualization, and structured summary
+export.
 
 Stage 2 can be executed through either the Python API or a command-line
 interface (CLI). Temporal-cluster selection and earthquake-related
@@ -293,9 +294,9 @@ Run the complete regression suite with:
 python -m pytest tests/ -q
 ```
 
-The test suite includes the Modern GIM adapters and Legacy–Modern validation
-utilities. Run `python -m pytest -q` to obtain the current test count; the
-previously documented 412-test baseline predates these additions.
+The complete repository test suite passed 474 tests in October 2026
+(`python -m pytest -q`). This includes the scientific frameworks, staged
+workflow, Modern CODE GIM adapters, and Legacy–Modern validation utilities.
 
 The CLI integration tests use synthetic GIM datasets and verify actual
 PNG and JSON generation, explicit UTC window handling, output protection,
@@ -450,6 +451,43 @@ validation described elsewhere in this README.
 Real GIM datasets and local research artifacts are not included
 in the repository.
 
+## Research & Publications
+
+The scientific methods implemented in this repository are associated with the
+following peer-reviewed publication:
+
+Y.-C. Wen, J.-Y. Liu, C.-Y. Lin, and M.-C. Su,
+"A Hybrid Approach Using Statistics and Unsupervised Learning to Investigate
+the Impact of Ionospheric Storm Disturbances on Pre-Earthquake Total Electron
+Content Anomalies," *IEEE Journal of Selected Topics in Applied Earth
+Observations and Remote Sensing*, vol. 19, pp. 23747–23759, 2026.
+
+- [IEEE Xplore paper](https://ieeexplore.ieee.org/document/11595710)
+- [DOI: 10.1109/JSTARS.2026.3709918](https://doi.org/10.1109/JSTARS.2026.3709918)
+- [Google Scholar profile](https://scholar.google.com/citations?user=8P4lE88AAAAJ&hl=zh-TW)
+- [IEEE Xplore author profile](https://ieeexplore.ieee.org/author/152460869663948)
+
+The existing Afghanistan scientific validation results described below are
+distinct from full end-to-end reproduction of the published case using the
+Modern CODE GIM interface, which has not yet been demonstrated.
+
+## Citation
+
+If you use the scientific methods in academic research, please cite the
+associated publication:
+
+```bibtex
+@article{Wen2026IonosphericTEC,
+  author  = {Wen, Yun-Cheng and Liu, Jann-Yenq and Lin, Chi-Yen and Su, Mu-Chun},
+  title   = {A Hybrid Approach Using Statistics and Unsupervised Learning to Investigate the Impact of Ionospheric Storm Disturbances on Pre-Earthquake Total Electron Content Anomalies},
+  journal = {IEEE Journal of Selected Topics in Applied Earth Observations and Remote Sensing},
+  volume  = {19},
+  pages   = {23747--23759},
+  year    = {2026},
+  doi     = {10.1109/JSTARS.2026.3709918}
+}
+```
+
 ## Scientific Validation
 
 Real-data validation scripts for the Statistical–Clustering Hybrid Module
@@ -565,8 +603,6 @@ Current progress:
 - Modern CODE GIM adapters — implemented and tested for Framework A, B+C, and D inputs.
 - Legacy–Modern CODE GIM validation suite — selected 16-day real-data integration validation passed.
 
-The full test count should be refreshed from the latest `python -m pytest -q` run before release.
-
 The staged workflow supports reproducible spatial verification using
 researcher-selected UTC windows and structured research artifacts.
 
@@ -579,4 +615,6 @@ preserving scientific reproducibility and researcher control.
 
 ## License
 
-License information will be provided with the finalized repository.
+This project is licensed under the [MIT License](LICENSE).
+
+Copyright (c) 2026 Yun-Cheng Wen.
