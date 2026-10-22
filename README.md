@@ -92,6 +92,15 @@ The implementation has been verified through synthetic tests, fixed
 regression tests, and real-data numerical-equivalence validation against
 the legacy implementation used in the associated study.
 
+The historical earthquake catalog has also been checked against the original
+Afghanistan catalog: 741 representative event dates and magnitudes match, and
+74 events satisfy the M >= 6.0 selection and usable-window criteria. Four
+event coordinates differ and remain documented for review. End-to-end B+C
+reproduction using the original saved 1999–2021 historical TEC together with
+the independently reconstructed USGS catalog remains a separate task. The
+newly downloaded 23-year Modern GIM archive is **not required** for that
+work.
+
 ### 3. Spatial Anomaly Verification Framework
 
 The Spatial Anomaly Verification Framework has been implemented and scientifically validated for the Afghanistan case.
@@ -114,7 +123,19 @@ The validated Afghanistan case reproduces the expected spatial anomaly results:
 
 The production implementation reproduces all four spatial anomaly matrices with exact numerical agreement against the legacy reference.
 
-The spatial verification window is currently specified explicitly rather than automatically selected from clustering results.
+A separate Modern CODE GIM Afghanistan 2022 reproduction has also passed
+six reported checks: 120 verification hours on 5,183 grid cells, a
+positive maximum of 10.0% at (-22.5°, -155°) and (-22.5°, -150°),
+and a negative maximum of 85.0% at (30.0°N, 70.0°E).
+The corrected Modern visualization uses ascending physical latitude,
+complete grid boundaries, coastlines and national borders, and consistent
+maximum-location coordinates in the spatial summary. These reported
+checks do not by themselves establish equality of every global grid cell.
+
+The spatial verification window is currently specified explicitly rather
+than automatically selected from clustering results. The validated Modern
+GIM spatial calculation is available separately; an opt-in Modern input
+path for the main Stage 2 CLI is planned, not yet complete.
 
 ### 4. Modern GIM Data Integration and Validation
 
@@ -132,9 +153,35 @@ This establishes numerical consistency for the tested configuration, not full
 reproduction of the historical earthquake studies. See
 [Legacy–Modern GIM Validation](docs/validation/gim_legacy_modern.md).
 
+### Modern Afghanistan 2022 Reproduction Examples
+
+The `examples/` scripts make the verified Modern case reproducible when
+the external 2022 CODE GIM daily NPZ files are available:
+
+- `reproduce_afghanistan_temporal_case.py` — Framework A's 744-hour case:
+  37 positive, 610 normal and 97 negative anomaly hours.
+- `review_afghanistan_framework_d_windows.py` — a review-only daily
+  Framework A anomaly report. The reference May 28–June 1, 2022 interval
+  contains 18, 16, 24, 20 and 17 negative hours, respectively (95/120).
+  This **does not** automatically select or scientifically confirm a window.
+- `reproduce_afghanistan_spatial_visuals.py` — Modern Framework D's
+  May 28–June 1 spatial maps and peak summary, using 15 reference days
+  and a quartile threshold multiplier of 3.0.
+
+Generated PNG/JSON outputs and research NPZ/NPY data are not committed to
+the repository. The `outputs/` directory is ignored by Git.
+
 ## Repository Structure
 
 ```text
+AGENTS.md
+    AI-agent instructions and scientific safeguards.
+
+examples/
+    reproduce_afghanistan_temporal_case.py
+    reproduce_afghanistan_spatial_visuals.py
+    review_afghanistan_framework_d_windows.py
+
 src/
     data/
         modern_gim_loader.py
@@ -212,6 +259,9 @@ tests/
         Fixed Afghanistan regression references and tests.
 
 docs/
+    agent_handoff.md
+        Verified results, remaining tasks, and AI-agent acceptance criteria.
+
     validation/gim_legacy_modern.md
         Modern GIM equivalence validation procedure, results, and limits.
 
@@ -251,6 +301,18 @@ Install the required packages with:
 ```bash
 python -m pip install -r requirements.txt
 ```
+
+Modern paper-style spatial maps can optionally overlay coastlines and
+national borders using Cartopy. Install it separately when generating those
+maps:
+
+```bash
+python -m pip install cartopy
+```
+
+Cartopy is a visualization dependency, not a requirement for numerical
+TEC anomaly calculations. Its Natural Earth geographic layers may require
+an initial download.
 
 ## Testing
 
@@ -590,28 +652,38 @@ the real-data scientific validation of the Afghanistan case.
 
 ## Development Status
 
-The repository is under active development.
+The three scientific framework implementations are maintained alongside
+Legacy references, regression tests, and selected real-data validation.
 
-Current progress:
+**Verified work:**
 
-- Temporal Anomaly Detection Framework — implemented and scientifically validated.
-- Statistical–Clustering Hybrid Module — implemented and scientifically validated.
-- Spatial Anomaly Verification Framework — implemented and scientifically validated for the Afghanistan case.
-- Stage 1 Preparation Manifest — implemented and tested.
-- Stage 2 Spatial Verification Workflow — implemented and tested.
-- Stage 2 CLI — implemented and validated through synthetic end-to-end integration tests.
-- Modern CODE GIM adapters — implemented and tested for Framework A, B+C, and D inputs.
-- Legacy–Modern CODE GIM validation suite — selected 16-day real-data integration validation passed.
+- Framework A: Modern Afghanistan 2022 temporal reproduction
+  (37 positive, 610 normal, 97 negative hours).
+- Framework B+C: tested statistical and K-means algorithms, original
+  Afghanistan scientific validation and historical catalog/event selection
+  checks. The full new end-to-end run combining the original 1999–2021 TEC
+  with the independently reconstructed USGS catalog remains open.
+- Framework D: Modern Afghanistan 2022 spatial calculation and corrected
+  geographic visualization (positive maximum 10%, negative maximum 85%).
+- Stage 1 Preparation Manifest, legacy-oriented Stage 2 workflow and CLI,
+  and selected Legacy–Modern GIM equivalence tests.
 
-The staged workflow supports reproducible spatial verification using
-researcher-selected UTC windows and structured research artifacts.
+**Remaining work:**
 
-A fully automated pipeline coupling temporal anomaly detection,
-statistical clustering, verification-window selection, and scientific
-interpretation is not yet provided.
+- Reproduce Framework B+C end to end using the **original saved historical
+  TEC**, without re-downloading or reconstructing the complete 23-year GIM.
+- Derive reviewable candidate spatial windows from Framework A evidence and
+  B+C statistical/clustering results, while preserving researcher approval.
+- Integrate a separately selectable Modern GIM input into the formal Stage 2
+  workflow without breaking the existing Legacy path.
+- Run and document current full-suite tests after further changes.
 
-Future development will focus on extending workflow integration while
-preserving scientific reproducibility and researcher control.
+The repository is being prepared for AI-agent-assisted development. Coding
+agents may handle implementation, testing and integration, while scientific
+interpretation and final acceptance stay with the researcher. See
+[AGENTS.md](AGENTS.md) and [AI Agent Handoff](docs/agent_handoff.md).
+
+The full autonomous A+B+C-to-D workflow is **not yet implemented**.
 
 ## License
 
