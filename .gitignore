@@ -19,3 +19,12 @@ processed/
 # Operating system
 .DS_Store
 Thumbs.db
+
+# Generated research outputs
+outputs/
+
+# Temporary patch backups
+*.pre_modern_viz.bak
+
+# One-time local patch tool
+/update_spatial_visualization_fixed.py
