@@ -153,6 +153,7 @@ def test_shared_parameters_forwarded(monkeypatch, tmp_path):
 
     assert arguments["clustering"]["n_clusters"] == 3
     assert arguments["clustering"]["random_state"] == 7
+    assert arguments["clustering"]["observation_days"] == 20
 
     assert arguments["temporal"]["reference_days"] == 12
     assert arguments["temporal"]["threshold_multiplier"] == 1.5

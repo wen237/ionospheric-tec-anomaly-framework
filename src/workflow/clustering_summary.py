@@ -1,4 +1,9 @@
-"""JSON summary export for Framework B+C preparation results."""
+"""V2 JSON summary export with separate full-B and pre-event-C scopes.
+
+V1 counted clustering cells over the full supplied significance mask.
+V2 records the selected pre-event window and counts only its nonzero cells.
+Preparation Manifest and Spatial Summary schema versions are independent.
+"""
 
 import json
 import math
@@ -7,9 +12,10 @@ from pathlib import Path
 import numpy as np
 
 from .preparation_workflow import PreparationWorkflowRunResult
+from .clustering_adapter import select_pre_event_clustering_window
 
 
-SUMMARY_SCHEMA_VERSION = 1
+SUMMARY_SCHEMA_VERSION = 2
 
 
 def _json_scalar(value):
@@ -111,7 +117,17 @@ def build_clustering_summary(
     ):
         raise ValueError("Inconsistent overlap count.")
 
-    n_mask_cells = int(np.count_nonzero(mask))
+    clustering_mask, clustering_days = select_pre_event_clustering_window(
+        mask, significance.relative_days,
+        observation_days=samples.observation_days,
+    )
+    if not (
+        np.array_equal(workflow.clustering_mask, clustering_mask)
+        and np.array_equal(workflow.clustering_relative_days, clustering_days)
+    ):
+        raise ValueError("Inconsistent pre-event clustering window.")
+
+    n_mask_cells = int(np.count_nonzero(clustering_mask))
 
     if workflow.n_significant_cells != n_mask_cells:
         raise ValueError("Inconsistent significant cell count.")
@@ -191,9 +207,14 @@ def build_clustering_summary(
             ),
         },
         "clustering": {
+            "window_selection": "pre_event",
+            "relative_day_start": int(clustering_days[0]),
+            "relative_day_end": int(clustering_days[-1]),
             "n_clusters": int(workflow.n_clusters),
             "random_state": int(workflow.random_state),
             "n_significant_cells": n_mask_cells,
+            "positive_mask_count": int(np.count_nonzero(clustering_mask == 1)),
+            "negative_mask_count": int(np.count_nonzero(clustering_mask == -1)),
             "temporal_anchors": anchors,
         },
     }

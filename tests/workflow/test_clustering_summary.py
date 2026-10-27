@@ -19,18 +19,17 @@ from src.workflow.clustering_summary import (
 
 
 def make_result():
-    mask = np.array(
-        [[1, -1, 0] + [0] * 21],
-        dtype=np.int8,
-    )
+    relative_days = np.arange(-30, 31)
+    positive = np.zeros((61, 24), dtype=bool)
+    negative = np.zeros((61, 24), dtype=bool)
 
-    positive = np.zeros((1, 24), dtype=bool)
-    negative = np.zeros((1, 24), dtype=bool)
-
-    positive[0, [0, 2]] = True
-    negative[0, [1, 2]] = True
+    positive[22, [0, 2]] = True  # Day -8; hour 2 has both polarities.
+    negative[22, [1, 2]] = True
+    positive[31, 3] = True  # Post-event diagnostics must remain in B only.
+    negative[32, 4] = True
 
     overlap = positive & negative
+    mask = positive.astype(np.int8) - negative.astype(np.int8)
 
     anchors = [
         NS(
@@ -85,7 +84,7 @@ def make_result():
                 observation_days=30,
             ),
             earthquake_subset=NS(
-                relative_days=np.array([-8]),
+                relative_days=relative_days,
             ),
         ),
         statistical_significance=NS(
@@ -95,7 +94,7 @@ def make_result():
             overlap_mask=overlap,
             overlap_count=1,
             critical_z=1.96,
-            relative_days=np.array([-8]),
+            relative_days=relative_days,
             n_events=4,
         ),
         clustering_workflow=NS(
@@ -103,6 +102,8 @@ def make_result():
             n_clusters=2,
             random_state=42,
             n_significant_cells=2,
+            clustering_mask=mask[:31].copy(),
+            clustering_relative_days=relative_days[:31].copy(),
         ),
     )
 
@@ -110,7 +111,7 @@ def make_result():
 def test_summary_structure():
     summary = build_clustering_summary(make_result())
 
-    assert summary["schema_version"] == 1
+    assert summary["schema_version"] == 2
     assert summary["case_id"] == "synthetic_case"
     assert summary["historical_data"]["n_days"] == 400
     assert summary["earthquake_selection"]["n_selected_events"] == 4
@@ -124,11 +125,38 @@ def test_significance_counts_distinguish_overlap():
     summary = build_clustering_summary(make_result())
     stats = summary["statistical_significance"]
 
-    assert stats["positive_significant_count"] == 2
-    assert stats["negative_significant_count"] == 2
+    assert stats["positive_significant_count"] == 3
+    assert stats["negative_significant_count"] == 3
     assert stats["overlap_count"] == 1
-    assert stats["positive_mask_count"] == 1
-    assert stats["negative_mask_count"] == 1
+    assert stats["positive_mask_count"] == 2
+    assert stats["negative_mask_count"] == 2
+
+
+def test_summary_distinguishes_full_and_pre_event_windows():
+    summary = build_clustering_summary(make_result())
+    stats = summary["statistical_significance"]
+    clustering = summary["clustering"]
+
+    assert (stats["relative_day_start"], stats["relative_day_end"]) == (-30, 30)
+    assert clustering["window_selection"] == "pre_event"
+    assert (clustering["relative_day_start"], clustering["relative_day_end"]) == (-30, 0)
+    assert clustering["n_significant_cells"] == 2
+    assert clustering["positive_mask_count"] == 1
+    assert clustering["negative_mask_count"] == 1
+
+
+def test_summary_rejects_full_window_clustering_count():
+    result = make_result()
+    result.clustering_workflow.n_significant_cells = 4
+    with pytest.raises(ValueError, match="significant cell count"):
+        build_clustering_summary(result)
+
+
+def test_summary_rejects_inconsistent_clustering_selection():
+    result = make_result()
+    result.clustering_workflow.clustering_mask[0, 0] = 1
+    with pytest.raises(ValueError, match="pre-event clustering window"):
+        build_clustering_summary(result)
 
 
 def test_temporal_anchor_fields():
@@ -160,6 +188,8 @@ def test_save_and_reload_json(tmp_path):
     with saved.open("r", encoding="utf-8") as file:
         loaded = json.load(file)
 
+    assert loaded["schema_version"] == 2
+    assert loaded["clustering"]["window_selection"] == "pre_event"
     assert loaded == build_clustering_summary(make_result())
 
 
@@ -202,7 +232,7 @@ def test_reject_inconsistent_overlap():
 def test_reject_inconsistent_mask():
     result = make_result()
 
-    result.statistical_significance.significance_mask[0, 0] = 0
+    result.statistical_significance.significance_mask[22, 0] = 0
 
     with pytest.raises(ValueError, match="encoding"):
         build_clustering_summary(result)

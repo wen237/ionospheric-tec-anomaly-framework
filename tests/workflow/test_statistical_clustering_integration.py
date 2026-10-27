@@ -60,6 +60,12 @@ def make_synthetic_historical_data():
             NEGATIVE_HOUR,
         ] -= 10.0
 
+        # Day 0 belongs to the pre-event calendar-day selection. Post-event
+        # signals must remain in B diagnostics without entering C.
+        daily[event_index, 21] += 10.0
+        daily[event_index + 8, 6] += 10.0
+        daily[event_index + 22, 18] -= 10.0
+
     epochs = np.asarray(
         [
             START + timedelta(hours=i)
@@ -150,11 +156,44 @@ def test_full_workflow_contract():
     )
 
     assert significance.significance_mask.shape == (61, 24)
+    np.testing.assert_array_equal(significance.relative_days, np.arange(-30, 31))
+    np.testing.assert_array_equal(clustering.clustering_relative_days, np.arange(-30, 1))
+    np.testing.assert_array_equal(clustering.clustering_mask, significance.significance_mask[:31])
+    assert clustering.significance is significance
 
     assert clustering.n_clusters == 2
     assert clustering.n_significant_cells >= 2
 
     assert len(clustering.clustering.temporal_anchors) == 2
+
+
+def test_post_event_and_day_zero_signals_across_real_scientific_stages():
+    _, analysis, significance, clustering = run_full_workflow()
+    assert significance.significance_mask[30, 21] == 1  # Day 0.
+    assert significance.significance_mask[38, 6] == 1  # Day +8.
+    assert significance.significance_mask[52, 18] == -1  # Day +22.
+
+    features = clustering.clustering.clustering_features.raw_features
+    expected = {
+        (hour, row - 30, int(significance.significance_mask[row, hour]))
+        for row, hour in np.argwhere(significance.significance_mask[:31] != 0)
+    }
+    assert {tuple(cell) for cell in features} == expected
+    assert (21, 0, 1) in expected
+    assert np.all(features[:, 1] <= 0)
+
+    # C must not mutate any full-window B array, including z-score and overlap
+    # diagnostics. Re-run C on the same objects and compare byte-for-byte values.
+    objects = (analysis.earthquake_subset, significance, significance.z_test)
+    snapshots = [
+        {name: value.copy() for name, value in vars(obj).items()
+         if isinstance(value, np.ndarray)}
+        for obj in objects
+    ]
+    run_clustering_workflow(significance, observation_days=30)
+    for obj, snapshot in zip(objects, snapshots):
+        for name, original in snapshot.items():
+            np.testing.assert_array_equal(getattr(obj, name), original)
 
 
 def test_population_probabilities():

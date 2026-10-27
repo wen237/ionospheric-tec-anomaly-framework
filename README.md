@@ -77,6 +77,38 @@ The clustering stage includes:
 - paper-style centroid presentation
 - integrated clustering pipeline
 
+The standard B+C workflow preserves Framework B's complete Day -30 through
+Day +30 statistical and significance results, but selects only Day -30 through
+Day 0 (inclusive) before Framework C clustering. With a different
+`observation_days`, the selected range is `-observation_days..0`. Day 0 is the
+earthquake's UTC calendar date. Clustering summaries report this selected
+range and its cell counts separately from the full-window significance counts.
+
+Clustering summaries now use **schema V2** (`schema_version: 2`). This is an
+explicit contract change from V1, where `clustering.n_significant_cells`
+counted nonzero cells over the entire supplied significance mask. V2 defines
+that count over the selected pre-event mask and adds these `clustering` fields:
+`window_selection` (`"pre_event"`), inclusive `relative_day_start` /
+`relative_day_end`, and selected `positive_mask_count` / `negative_mask_count`.
+The `statistical_significance` section retains full-window counts and bounds;
+overlap diagnostics and Legacy mask encoding are unchanged.
+
+Consumers that interpret clustering results must check `schema_version` and
+handle V1 and V2 scopes explicitly, or reject unsupported versions. Existing V1
+files are not migrated; changing their version number alone cannot recover
+pre-event counts or anchors. Produce V2 results by rerunning the corrected
+workflow with the original inputs. Preparation Manifest and Spatial Summary
+remain independently versioned at V1. Stage 2 checks the clustering artifact's
+path and existence without interpreting its JSON schema; that check does not
+validate either summary format.
+
+The Python `StatisticalClusteringWorkflowResult` retains the original B result
+in `significance` and adds required fields `clustering_mask` (a copied
+`(observation_days + 1, 24)` mask) and `clustering_relative_days` (its copied
+`-observation_days..0` row axis). Its `n_significant_cells` counts nonzero cells
+in that selected mask. Code constructing the dataclass directly must provide
+both new fields; prefer `run_clustering_workflow()` to obtain a validated result.
+
 For the Afghanistan case, the validated 30-day analysis window contains
 34 statistically significant cells:
 
