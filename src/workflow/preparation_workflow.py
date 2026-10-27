@@ -101,11 +101,12 @@ def run_preparation_workflow(
         critical_z=critical_z,
     )
 
-    # Framework C: validated K-Means and temporal anchors.
+    # Framework C: select Day -observation_days..0 before validated K-Means.
     clustering = run_clustering_workflow(
         significance=significance,
         n_clusters=n_clusters,
         random_state=random_state,
+        observation_days=observation_days,
     )
 
     # Framework A: case-specific temporal anomaly analysis.

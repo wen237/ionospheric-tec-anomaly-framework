@@ -358,9 +358,16 @@ def test_e2e_statistical_significance(
     assert (
         result.clustering_workflow.n_significant_cells
         == np.count_nonzero(
-            significance.significance_mask
+            significance.significance_mask[relative_days <= 0]
         )
     )
+
+    clustering = result.clustering_workflow
+    np.testing.assert_array_equal(clustering.clustering_relative_days, np.arange(-30, 1))
+    np.testing.assert_array_equal(
+        clustering.clustering_mask, significance.significance_mask[relative_days <= 0]
+    )
+    assert clustering.significance is significance
 
 
 def test_e2e_summary_matches_scientific_results(
@@ -375,7 +382,7 @@ def test_e2e_summary_matches_scientific_results(
     stats = summary["statistical_significance"]
     cluster_info = summary["clustering"]
 
-    assert summary["schema_version"] == 1
+    assert summary["schema_version"] == 2
     assert summary["case_id"] == "synthetic_e2e"
 
     assert (
@@ -401,6 +408,8 @@ def test_e2e_summary_matches_scientific_results(
 
     assert cluster_info["n_clusters"] == 2
     assert cluster_info["random_state"] == 42
+    assert (stats["relative_day_start"], stats["relative_day_end"]) == (-30, 30)
+    assert (cluster_info["relative_day_start"], cluster_info["relative_day_end"]) == (-30, 0)
 
     assert cluster_info["n_significant_cells"] == (
         clustering.n_significant_cells

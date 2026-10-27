@@ -1,5 +1,6 @@
 """Unit tests for Stage 2 spatial verification orchestration."""
 
+import json
 from datetime import datetime, timezone
 from pathlib import Path
 from types import SimpleNamespace
@@ -257,7 +258,12 @@ def test_invalid_k_rejected(
     assert workflow_case["calls"] == []
 
 
-def test_stage_one_files_unchanged(workflow_case):
+@pytest.mark.parametrize("clustering_schema_version", [1, 2])
+def test_stage_one_files_unchanged(workflow_case, clustering_schema_version):
+    # Stage 2 treats the summary as an opaque artifact, not a parsed schema.
+    workflow_case["summary"].write_text(
+        json.dumps({"schema_version": clustering_schema_version}), encoding="utf-8",
+    )
     paths = [
         workflow_case["manifest_path"],
         workflow_case["temporal"],
@@ -269,7 +275,8 @@ def test_stage_one_files_unchanged(workflow_case):
         for path in paths
     }
 
-    run_case(workflow_case)
+    result = run_case(workflow_case)
+    assert result.preparation_manifest.schema_version == 1
 
     for path in paths:
         assert path.read_bytes() == before[path]
