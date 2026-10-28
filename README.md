@@ -127,11 +127,55 @@ the legacy implementation used in the associated study.
 The historical earthquake catalog has also been checked against the original
 Afghanistan catalog: 741 representative event dates and magnitudes match, and
 74 events satisfy the M >= 6.0 selection and usable-window criteria. Four
-event coordinates differ and remain documented for review. End-to-end B+C
-reproduction using the original saved 1999–2021 historical TEC together with
-the independently reconstructed USGS catalog remains a separate task. The
-newly downloaded 23-year Modern GIM archive is **not required** for that
-work.
+event coordinates differ and remain documented for review. On 2026-10-28,
+the original saved 1999–2021 TEC together with the verified filtered USGS
+catalog reproduced all five historical B+C references above. Date-aligned
+outputs also matched the Legacy catalog and existing Legacy algorithms.
+The newly downloaded 23-year Modern GIM archive is **not required**.
+
+#### Reproduce Historical Afghanistan B+C
+
+From the repository root, using an environment with the project dependencies:
+
+```bash
+python -m examples.reproduce_afghanistan_historical_bc \
+    --tec /path/to/tec33.092_69.514.npy \
+    --catalog /path/to/afghanistan_usgs_filtered.csv \
+    --legacy-eqlist /path/to/eqlist.npy \
+    --output-dir outputs/afghanistan_historical_bc
+```
+
+`--legacy-eqlist` is optional. On PowerShell, use backticks for line
+continuation, or enter the command on one line. The local project interpreter
+can be invoked as `.\.venv\Scripts\python.exe`.
+
+The example calls the five production B+C adapters with the fixed 1999–2021,
+M >= 6.0, 30-day observation, 15-day reference, quartile multiplier 3.0,
+critical z 1.96, pre-event Day -30..0, and K-means k=2 / random state 42
+configuration. It accepts TEC shapes `(201624,)`, `(201624,1)` and `(8401,24)`
+in chronological order, rejects missing/non-finite values, and requires zero
+adapter interpolation and unchanged TEC values. The UTC hourly timeline is
+assigned from the Legacy convention; NPY does not contain timestamps or
+historical interpolation provenance.
+
+The output is `afghanistan_historical_bc_summary.json`, with input paths and
+SHA-256 hashes, before/after input integrity verification, coverage, dependency
+versions and installed K-means defaults (including `n_init`), population and
+subset statistics, selected event dates, full-B and pre-event-C significance
+and overlap diagnostics, centroids, cluster composition, anchors, silhouette,
+and expected-versus-observed reference comparisons. Supplying Legacy data
+also runs the same production pipeline for that catalog and compares outputs
+after UTC-date alignment.
+
+This standalone report has `summary_type: "afghanistan_historical_bc_reproduction"`
+and its own schema version 1. It is not the Preparation workflow's clustering
+summary V2 or a Stage 2 manifest; no Framework A placeholder is constructed.
+Existing output is rejected (exit 3) unless `--overwrite` explicitly authorizes
+replacement. Invalid inputs return exit 2. A completed calculation returns
+exit 0 even when references differ: inspect `reference_comparison.all_match`
+and, when provided, `legacy_comparison.all_match`. Differences are reported
+without fitting parameters to the references. No spatial window or precursor
+interpretation is generated.
 
 ### 3. Spatial Anomaly Verification Framework
 
@@ -210,6 +254,7 @@ AGENTS.md
     AI-agent instructions and scientific safeguards.
 
 examples/
+    reproduce_afghanistan_historical_bc.py
     reproduce_afghanistan_temporal_case.py
     reproduce_afghanistan_spatial_visuals.py
     review_afghanistan_framework_d_windows.py
@@ -388,8 +433,11 @@ Run the complete regression suite with:
 python -m pytest tests/ -q
 ```
 
-The complete repository test suite passed 474 tests in October 2026
-(`python -m pytest -q`). This includes the scientific frameworks, staged
+Final verification on 2026-10-28, including the atomic-output follow-up:
+28 historical B+C CLI tests passed, and the complete repository suite passed 576 tests
+(`python -B -m pytest tests -q -p no:cacheprovider`), with one expected warning
+from a simulated Stage 2 cleanup failure. This includes the scientific
+frameworks, the historical B+C CLI's 28 integration and failure-injection cases, staged
 workflow, Modern CODE GIM adapters, and Legacy–Modern validation utilities.
 
 The CLI integration tests use synthetic GIM datasets and verify actual
@@ -593,7 +641,8 @@ validation/statistical_clustering/
 
 They validate the Afghanistan workflow sequentially through:
 
-1. historical TEC reconstruction
+1. historical TEC reconstruction (archival equivalence check; not required
+   by the saved-TEC reproduction CLI)
 2. earthquake sample extraction
 3. earthquake subset selection
 4. population anomaly calculation
@@ -691,10 +740,11 @@ Legacy references, regression tests, and selected real-data validation.
 
 - Framework A: Modern Afghanistan 2022 temporal reproduction
   (37 positive, 610 normal, 97 negative hours).
-- Framework B+C: tested statistical and K-means algorithms, original
-  Afghanistan scientific validation and historical catalog/event selection
-  checks. The full new end-to-end run combining the original 1999–2021 TEC
-  with the independently reconstructed USGS catalog remains open.
+- Framework B+C: original 1999–2021 TEC plus verified USGS catalog reproduced
+  74 selected events, 34 pre-event significant cells (18 positive / 16 negative),
+  Day -8 positive and Day -22 negative anchors, and silhouette
+  0.31105623341145205. A reproducible example CLI and synthetic integration
+  tests cover this path, with optional UTC-date-aligned Legacy comparison.
 - Framework D: Modern Afghanistan 2022 spatial calculation and corrected
   geographic visualization (positive maximum 10%, negative maximum 85%).
 - Stage 1 Preparation Manifest, legacy-oriented Stage 2 workflow and CLI,
@@ -702,8 +752,6 @@ Legacy references, regression tests, and selected real-data validation.
 
 **Remaining work:**
 
-- Reproduce Framework B+C end to end using the **original saved historical
-  TEC**, without re-downloading or reconstructing the complete 23-year GIM.
 - Derive reviewable candidate spatial windows from Framework A evidence and
   B+C statistical/clustering results, while preserving researcher approval.
 - Integrate a separately selectable Modern GIM input into the formal Stage 2
