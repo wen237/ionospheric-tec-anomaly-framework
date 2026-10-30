@@ -102,6 +102,7 @@ def rewrite(harness, entries, *, rechain=False, markers=True):
 
 def test_empty_initialization_and_reinitialization_rejected(harness):
     result = harness.validate()
+    assert (harness.root / "history.lock").is_file()
     assert result["local_store_valid"]
     assert all(result[name] for name in ("store_structurally_valid", "hash_chain_valid", "head_consistent",
                                        "checkpoint_consistent", "entries_signature_valid", "decision_history_valid"))
@@ -655,8 +656,40 @@ def test_configured_root_and_identity_are_explicit(tmp_path, registry):
 
 def test_missing_store_does_not_initialize_itself(tmp_path, registry):
     store = AuthorizationStore(tmp_path, store_id=STORE_ID, trusted_keys=registry)
-    assert store.validate(now_utc=NOW)["reason_codes"] == ["store_io_failure"]
+    assert store.validate(now_utc=NOW)["reason_codes"] == ["lock_unavailable"]
     assert not (tmp_path / "head.json").exists()
+    assert not (tmp_path / "history.lock").exists()
+
+
+@pytest.mark.parametrize("operation", ["validate", "append"])
+def test_initialized_store_missing_lock_never_recreates_or_mutates_files(harness, intent, proposal, operation):
+    pending, approved = review_chain(intent)
+    harness.add(intent, proposal, pending)  # ordinary initialized-store append succeeds
+    (harness.root / "history.lock").unlink()
+    before = {path.name: path.read_bytes() for path in harness.root.iterdir()}
+    assert set(before) == {"history.jsonl", "head.json", "checkpoint.json"}
+
+    def forbidden(*args, **kwargs):
+        raise AssertionError("Missing permanent lock must fail before signing.")
+
+    if operation == "validate":
+        result = harness.validate()
+        assert result["reason_codes"] == ["lock_unavailable"]
+        assert not result["local_store_valid"]
+    else:
+        with pytest.raises(StoreError) as caught:
+            harness.add(intent, proposal, approved, signer=forbidden)
+        assert caught.value.code == "lock_unavailable"
+    assert not (harness.root / "history.lock").exists()
+    assert {path.name: path.read_bytes() for path in harness.root.iterdir()} == before
+
+
+def test_lock_helper_defaults_to_not_creating_files(tmp_path):
+    with pytest.raises(StoreError) as caught:
+        with module._exclusive(tmp_path):
+            raise AssertionError("Missing lock must prevent entering the critical section.")
+    assert caught.value.code == "lock_unavailable"
+    assert list(tmp_path.iterdir()) == []
 
 
 def test_different_configured_store_rejects_replay(harness, intent, proposal):

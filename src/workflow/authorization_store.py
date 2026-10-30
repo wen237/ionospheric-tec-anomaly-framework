@@ -281,11 +281,12 @@ def _release(handle):
 
 
 @contextmanager
-def _exclusive(root):
+def _exclusive(root, *, create=False):
     # Lock file is permanent, never replaced/unlinked. Lock beyond EOF works on
     # Windows; no pre-lock write is needed. Closing also releases a process lock.
+    # Only initialization opts into creating the initial permanent lock file.
     try:
-        handle = (root / "history.lock").open("a+b")
+        handle = (root / "history.lock").open("a+b" if create else "r+b")
     except OSError as exc:
         raise StoreError("lock_unavailable", str(exc)) from exc
     try:
@@ -402,7 +403,7 @@ class AuthorizationStore:
     def initialize(self) -> StoreHeadV1:
         """Initialize ONLY an empty root; never reset missing or damaged history."""
         try:
-            with _exclusive(self._root):
+            with _exclusive(self._root, create=True):
                 if any(path.name != "history.lock" for path in self._root.iterdir()):
                     raise StoreError("store_not_empty")
                 head = _marker(StoreHeadV1, self._store_id, 0, None)
@@ -503,10 +504,11 @@ class AuthorizationStore:
         Optional minimum_checkpoint must come from an independently protected
         trusted side. It is a consistency floor, not proof of its own origin.
         Any failure exposes no effective statuses, never an older approval.
+        Validation opens only the existing lock; a missing lock is not created.
         """
         result = _result()
         try:
-            with _exclusive(self._root):
+            with _exclusive(self._root, create=False):
                 self._state(result, now_utc, minimum_checkpoint)
         except StoreError as exc:
             result.update(reason_codes=[exc.code], detail=str(exc))
@@ -528,6 +530,7 @@ class AuthorizationStore:
         capability supplied from the trusted side, never a stored callback name.
         Exceptions from the capability propagate; no persistence precedes it.
         Failure after persistence is ambiguous and requires trusted recovery.
+        The permanent lock must already exist; append never recreates it.
         """
         if not callable(signer) or not isinstance(expected_head, StoreHeadV1):
             raise TypeError("Explicit signer capability and expected StoreHeadV1 are required.")
@@ -537,7 +540,7 @@ class AuthorizationStore:
         checked_intent = ExecutionIntent.from_dict(draft["execution_intent"])
         checked_decision = DecisionRecord.from_dict(draft["decision_record"])
         try:
-            with _exclusive(self._root):
+            with _exclusive(self._root, create=False):
                 entries, head = self._state(_result(), now_utc, minimum_checkpoint)
                 if head != StoreHeadV1.from_json(expected_head.to_json()):
                     raise StoreError("stale_expected_head")
