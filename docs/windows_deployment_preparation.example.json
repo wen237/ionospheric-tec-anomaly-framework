@@ -1,0 +1,37 @@
+{
+  "specification_type": "windows_isolation_acceptance_specification",
+  "schema_version": 1,
+  "purpose": "disposable_synthetic_only",
+  "run_id": "5f303f90-9e49-4fbf-a513-3955f986b9a0",
+  "deployment_root": "C:\\ProgramData\\TEC-Authorization-Acceptance\\5f303f90-9e49-4fbf-a513-3955f986b9a0",
+  "roles": {
+    "A": {"sids": [], "pids": []},
+    "W": {"sid": null, "pids": []},
+    "V": {"sid": null, "pids": []},
+    "M": {"sid": null, "pids": []}
+  },
+  "root_expectations": {
+    "resolved_path": null,
+    "volume_serial": null,
+    "volume_guid": null,
+    "owner_sid": null,
+    "sddl": null
+  },
+  "resource_expectations": {
+    "runtime": {"owner_sid": null, "sddl": null},
+    "python_executable": {"owner_sid": null, "sddl": null},
+    "application": {"owner_sid": null, "sddl": null},
+    "dependencies": {"owner_sid": null, "sddl": null},
+    "registry": {"owner_sid": null, "sddl": null},
+    "bootstrap": {"owner_sid": null, "sddl": null},
+    "configuration": {"owner_sid": null, "sddl": null},
+    "store_root": {"owner_sid": null, "sddl": null},
+    "history": {"owner_sid": null, "sddl": null},
+    "head": {"owner_sid": null, "sddl": null},
+    "local_checkpoint": {"owner_sid": null, "sddl": null},
+    "history_lock": {"owner_sid": null, "sddl": null},
+    "independent_checkpoint": {"owner_sid": null, "sddl": null},
+    "writer_diagnostics": {"owner_sid": null, "sddl": null},
+    "verifier_diagnostics": {"owner_sid": null, "sddl": null}
+  }
+}

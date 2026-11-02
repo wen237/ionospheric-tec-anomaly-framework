@@ -1,18 +1,42 @@
 """End-to-end synthetic GIM test for Framework A workflow."""
 
 from datetime import datetime, timedelta
+from types import SimpleNamespace
 
 import matplotlib
 matplotlib.use("Agg")
 
 import matplotlib.pyplot as plt
 import numpy as np
+import pytest
 
+from src.workflow import temporal_adapter, temporal_workflow
 from src.spatial_verification.spatial_grid import (
     GIM_LATITUDES,
     GIM_LONGITUDES,
 )
 from src.workflow.temporal_workflow import run_temporal_workflow
+
+
+@pytest.mark.parametrize("target", [temporal_workflow, temporal_adapter], ids=["workflow", "adapter"])
+def test_plotting_workflow_retains_both_monkeypatch_targets(tmp_path, monkeypatch, target):
+    series = SimpleNamespace(tec=np.array([10.0]), epochs=np.array([datetime(2022, 5, 28)], dtype=object))
+    detected = object()
+    output = tmp_path / "outputs" / "patched.png"
+    calls = []
+    monkeypatch.setattr(temporal_workflow, "load_temporal_tec_from_gim", lambda **kwargs: series)
+    monkeypatch.setattr(temporal_workflow, "detect_temporal_anomalies", lambda **kwargs: detected)
+
+    def save(result, output_path, *, title=None):
+        calls.append((result, output_path, title))
+        return output_path
+
+    monkeypatch.setattr(target, "save_temporal_analysis_plot", save)
+    result = run_temporal_workflow(tmp_path, datetime(2022, 5, 28), datetime(2022, 5, 28, 23),
+        latitude=33.02, longitude=69.46, output_path=output, title="Synthetic patched plot")
+    assert calls == [(detected, output, "Synthetic patched plot")]
+    assert result.plot_path == output
+    assert result.time_series is series and result.anomaly_result is detected
 
 
 def write_gim_day(
