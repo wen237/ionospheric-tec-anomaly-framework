@@ -15,9 +15,11 @@ from examples import select_afghanistan_mvp_window as handoff
 from examples import compare_afghanistan_mvp_spatial as spatial
 from examples.run_afghanistan_mvp_agent import main
 from src.agent import scientific_evidence_tools as evidence_module
+from src.agent import scientific_review_agent as agent_module
 from src.agent.scientific_evidence_tools import EvidenceTools, EXPERIMENTS, PRE_ROOT, POST_ROOT, SELECTION_ROOT, compact
 from src.agent.scientific_review_agent import (
     FakeModel, OpenAIModel, run_agent, save_run, _abstention,
+    AssessmentReferenceError, _check_assessment, _resolve,
 )
 from tests.workflow.test_select_afghanistan_mvp_window import bundle_factory, modern_dir
 from tests.workflow.test_planning_evidence import historical
@@ -243,6 +245,147 @@ def test_rejects_or_flags_unsupported_claims(pre_root, mutation):
     assert run["flags"]
 
 
+@pytest.mark.parametrize("invalid_section", ["observed_facts", "recommendation"])
+def test_missing_historical_pointer_is_rejected_without_repair(invalid_section):
+    # Minimal synthetic replica of the live trace's shape, not its research data.
+    results = {"R2": dict(ok=True, data=dict(silhouette=0.25))}
+    proposed = submission([("R2", "/data/silhouette", 0.25)], refs=[dict(result_id="R2", pointer="/data/silhouette")])
+    if invalid_section == "observed_facts":
+        proposed["observed_facts"][0]["pointer"] = "/data/analysis/silhouette"
+        expected = "/observed_facts/0"
+    else:
+        proposed["recommendation"]["evidence"][0]["pointer"] = "/data/analysis/silhouette"
+        expected = "/recommendation/evidence/0"
+    original = deepcopy(proposed)
+    with pytest.raises(AssessmentReferenceError) as raised:
+        _check_assessment(proposed, results, SimpleNamespace(mode="pre_spatial"))
+    assert raised.value.location == expected
+    assert str(raised.value) == "invalid_evidence_reference"
+    assert proposed == original
+
+
+def _reference_submission(pointer):
+    return submission([("R1", pointer, 744)], refs=[dict(result_id="R1", pointer=pointer)])
+
+
+def test_reference_recovery_preserves_attempts_and_exhausted_tool_budget(pre_root):
+    bad = _reference_submission("/data/missing/value")
+    valid = _reference_submission("/data/analysis/result_hours")
+    requests = []
+    def model(history, available):
+        requests.append(deepcopy(history))
+        if len(requests) == 1:
+            return [call("get_temporal_summary")]
+        if len(requests) == 2:
+            return [call("submit_assessment", bad, "bad")]
+        assert [t["name"] for t in available] == ["submit_assessment"]
+        feedback = json.loads(history[-1]["output"])
+        assert history[-1]["call_id"] == "bad"
+        assert feedback["ok"] is False
+        assert feedback["error"]["code"] == "invalid_evidence_reference"
+        assert feedback["error"]["assessment_location"] == "/observed_facts/0"
+        assert feedback["error"]["remaining_assessment_attempts"] == 1
+        assert feedback["error"]["resubmission_allowed"] is True
+        assert "/data/missing/value" not in compact(feedback)
+        assert str(pre_root) not in compact(feedback)
+        return [call("submit_assessment", valid, "corrected")]
+    run = run_agent(FakeModel(model), EvidenceTools(pre_root, "pre_spatial"), "Review.", max_tool_calls=1)
+    assert run["status"] == "submitted_for_researcher_review" and run["flags"] == []
+    assert len(requests) == 3 and len(run["evidence_actually_inspected"]) == 1
+    first, second = (e["calls"][0] for e in run["trace"][1:])
+    assert json.loads(first["arguments"]) == bad and first["status"] == "rejected_assessment"
+    assert second["status"] == "submitted_for_researcher_review"
+    assert [first["submission_attempt"], second["submission_attempt"]] == [1, 2]
+    assert run["budgets"]["tool_calls"] == 1 and run["budgets"]["turns"] == 10
+    assert run["execution_eligible"] is False and run["researcher_review"].startswith("REQUIRED")
+
+
+def test_second_invalid_reference_stops_without_a_third_submission(pre_root):
+    bad = _reference_submission("/data/missing/value")
+    partly_fixed = _reference_submission("/data/analysis/result_hours")
+    partly_fixed["recommendation"]["evidence"][0]["pointer"] = "/data/another_missing_value"
+    run = run_agent(FakeModel([[call("get_temporal_summary")], [call("submit_assessment", bad, "first")],
+        [call("submit_assessment", partly_fixed, "second")],
+        [call("submit_assessment", _reference_submission("/data/analysis/result_hours"), "third")]]),
+        EvidenceTools(pre_root, "pre_spatial"), "Review.")
+    assert run["status"] == "rejected_assessment" and len(run["trace"]) == 3
+    error = run["trace"][-1]["calls"][0]["result"]["error"]
+    assert error["assessment_location"] == "/recommendation/evidence/0"
+    assert error["resubmission_allowed"] is False and error["remaining_assessment_attempts"] == 0
+    assert run["assessment"]["recommendation"]["action"] == "abstain"
+
+
+def test_valid_first_submission_has_no_recovery_call(pre_root):
+    valid = _reference_submission("/data/analysis/result_hours")
+    run = run_agent(FakeModel([[call("get_temporal_summary")], [call("submit_assessment", valid, "done")],
+                              [call("get_historical_context", id="must-not-run")]]),
+                    EvidenceTools(pre_root, "pre_spatial"), "Review.")
+    assert run["status"] == "submitted_for_researcher_review" and len(run["trace"]) == 2
+    assert run["trace"][-1]["calls"][0]["submission_attempt"] == 1
+
+
+@pytest.mark.parametrize("unsupported", ["wrong_value", "numerical_prose", "causal", "predictive"])
+def test_reference_recovery_does_not_relax_scientific_checks(pre_root, unsupported):
+    bad = _reference_submission("/data/missing/value")
+    corrected = _reference_submission("/data/analysis/result_hours")
+    if unsupported == "wrong_value":
+        corrected["observed_facts"][0]["value_json"] = "745"
+    else:
+        text = {"numerical_prose": "There are 999 anomalies.", "causal": "These data establish causality.",
+                "predictive": "This pattern predicts an earthquake."}[unsupported]
+        corrected["scientific_inferences"] = [dict(text=text, evidence=[dict(result_id="R1", pointer="/data/counts")])]
+    run = run_agent(FakeModel([[call("get_temporal_summary")], [call("submit_assessment", bad, "first")],
+                              [call("submit_assessment", corrected, "second")]]),
+                    EvidenceTools(pre_root, "pre_spatial"), "Review.")
+    assert run["status"] in ("rejected_assessment", "flagged_abstention") and len(run["trace"]) == 3
+    assert run["assessment"]["recommendation"]["action"] == "abstain" and run["flags"]
+
+
+@pytest.mark.parametrize("name", ["get_temporal_summary", "compare_spatial_experiments", "run_framework_d"])
+def test_recovery_is_assessment_only_and_does_not_expand_tools(pre_root, name):
+    run = run_agent(FakeModel([[call("get_temporal_summary")],
+        [call("submit_assessment", _reference_submission("/data/missing/value"), "bad")], [call(name, id="forbidden")]]),
+        EvidenceTools(pre_root, "pre_spatial"), "Review.")
+    assert run["status"] == "rejected_assessment" and len(run["evidence_actually_inspected"]) == 1
+    assert run["trace"][-1]["calls"][0]["result"]["error"] == "assessment_resubmission_required"
+    assert run["execution_eligible"] is False
+
+
+def test_recovery_cannot_extend_the_model_turn_budget(pre_root, monkeypatch):
+    monkeypatch.setattr(agent_module, "MAX_TURNS", 2)
+    run = run_agent(FakeModel([[call("get_temporal_summary")],
+        [call("submit_assessment", _reference_submission("/data/missing/value"), "bad")],
+        [call("submit_assessment", _reference_submission("/data/analysis/result_hours"), "correction")]]),
+        EvidenceTools(pre_root, "pre_spatial"), "Review.")
+    assert run["status"] == "rejected_assessment" and len(run["trace"]) == 2
+    assert run["trace"][-1]["calls"][0]["result"]["error"]["resubmission_allowed"] is False
+
+
+def test_recovery_cannot_extend_the_history_budget(pre_root, monkeypatch):
+    requests = []
+    def model(history, tools):
+        requests.append(history)
+        if len(requests) == 1:
+            return [call("get_temporal_summary")]
+        invalid = call("submit_assessment", _reference_submission("/data/missing/value"), "bad")
+        # The submission fits, but its feedback would exceed the current budget.
+        size = len(compact(history + [dict(type="function_call", **invalid)]).encode("utf-8"))
+        monkeypatch.setattr(agent_module, "MAX_HISTORY_BYTES", size)
+        return [invalid]
+    run = run_agent(FakeModel(model), EvidenceTools(pre_root, "pre_spatial"), "Review.")
+    assert run["status"] == "rejected_assessment" and len(requests) == 2
+    assert run["trace"][-1]["calls"][0]["result"]["error"]["resubmission_allowed"] is False
+
+
+@pytest.mark.parametrize("pointer", ["/data/a~1b/~0key/00", "/data/a~1b/~0key/-1", "/data/a~1b/~0key/-",
+    "/data/a~1b/~0key/\u0660", "/data/a~1b/~0key/1", "/data/a~1b/~0key/0/missing", "/data/bad~2escape", "/sources/0"])
+def test_reference_recovery_preserves_strict_json_pointer_validation(pointer):
+    results = {"R1": dict(ok=True, data={"a/b": {"~key": [7]}, "bad~2escape": 8})}
+    assert _resolve(dict(result_id="R1", pointer="/data/a~1b/~0key/0"), results) == 7
+    with pytest.raises(AssessmentReferenceError):
+        _resolve(dict(result_id="R1", pointer=pointer), results)
+
+
 @pytest.mark.parametrize("text,flagged", [
     ("These data establish causality.", True),
     ("This result confirms an earthquake relationship.", True),
@@ -386,6 +529,34 @@ def test_live_adapter_mock_replays_reasoning_and_uses_explicit_model(pre_root):
     assert "opaque-test-state" not in compact(run)
     assert str(pre_root) not in compact(requests)
     assert model.config["live"] is False
+
+
+def test_provider_mock_replays_reference_feedback_without_transport_retry(pre_root):
+    class Item:
+        def __init__(self, data): self.data = data
+        def model_dump(self, **kwargs): return deepcopy(self.data)
+    requests = []
+    def create(**kwargs):
+        requests.append(deepcopy(kwargs))
+        number = len(requests)
+        if number == 1:
+            proposed = call("get_temporal_summary")
+        elif number == 2:
+            proposed = call("submit_assessment", _reference_submission("/data/missing/value"), "bad")
+        else:
+            assert number == 3
+            feedback = kwargs["input"][-1]
+            assert feedback["type"] == "function_call_output" and feedback["call_id"] == "bad"
+            assert json.loads(feedback["output"])["error"]["code"] == "invalid_evidence_reference"
+            assert [t["name"] for t in kwargs["tools"]] == ["submit_assessment"]
+            proposed = call("submit_assessment", _reference_submission("/data/analysis/result_hours"), "corrected")
+        return SimpleNamespace(output=[Item(dict(type="function_call", **proposed))], id="mock-" + str(number),
+                               model="explicit-mock-model", usage=None)
+    model = OpenAIModel("explicit-mock-model", client=SimpleNamespace(responses=SimpleNamespace(create=create)))
+    run = run_agent(model, EvidenceTools(pre_root, "pre_spatial"), "Review.")
+    assert run["status"] == "submitted_for_researcher_review" and len(requests) == 3
+    assert all(r["tool_choice"] == "required" and r["parallel_tool_calls"] is False and r["store"] is False for r in requests)
+    assert model.config["max_retries"] == 0 and model.config["live"] is False
 
 
 def test_provider_errors_do_not_log_secret_text(pre_root):
