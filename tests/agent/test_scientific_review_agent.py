@@ -19,7 +19,7 @@ from src.agent import scientific_review_agent as agent_module
 from src.agent.scientific_evidence_tools import EvidenceTools, EXPERIMENTS, PRE_ROOT, POST_ROOT, SELECTION_ROOT, compact
 from src.agent.scientific_review_agent import (
     FakeModel, OpenAIModel, run_agent, save_run, _abstention,
-    AssessmentReferenceError, _check_assessment, _resolve,
+    AssessmentReferenceError, AssessmentValidationError, _check_assessment, _resolve,
 )
 from tests.workflow.test_select_afghanistan_mvp_window import bundle_factory, modern_dir
 from tests.workflow.test_planning_evidence import historical
@@ -386,6 +386,154 @@ def test_reference_recovery_preserves_strict_json_pointer_validation(pointer):
         _resolve(dict(result_id="R1", pointer=pointer), results)
 
 
+def test_run02_wrong_anomaly_value_has_a_valid_reference():
+    # Synthetic response shape reproducing the confirmed Run 02 mismatch.
+    actual = dict(timestamp_utc="2022-06-02T00:00:00Z", anomaly_code=-1, classification="negative")
+    results = {"R5": dict(ok=True, data=dict(hourly=[None] * 120 + [actual]))}
+    claimed = dict(timestamp_utc=actual["timestamp_utc"], anomaly_code=0, classification="valid_normal")
+    proposed = submission([("R5", "/data/hourly/120", claimed)])
+    before = deepcopy(proposed)
+    assert _resolve(proposed["observed_facts"][0], results) == actual
+    with pytest.raises(AssessmentValidationError) as raised:
+        _check_assessment(proposed, results, SimpleNamespace(mode="pre_spatial"))
+    assert raised.value.issues == [dict(code="unsupported_observed_value", assessment_location="/observed_facts/0/value_json")]
+    assert proposed == before and results["R5"]["data"]["hourly"][120] == actual
+
+
+def test_submit_actions_are_mode_aware_and_host_validation_is_independent():
+    original = deepcopy(agent_module.SUBMIT)
+    pre = agent_module._submission_tool("pre_spatial")
+    post = agent_module._submission_tool("post_spatial")
+    def actions(tool): return tool["parameters"]["properties"]["recommendation"]["properties"]["action"]["enum"]
+    assert "review_spatial_comparison" not in actions(pre)
+    assert "review_spatial_comparison" in actions(post) and agent_module.SUBMIT == original
+    proposed = _reference_submission("/data/analysis/result_hours")
+    proposed["recommendation"]["action"] = "review_spatial_comparison"
+    # Bypass provider schemas: Host must still reject the mode violation.
+    with pytest.raises(AssessmentValidationError) as raised:
+        _check_assessment(proposed, {"R1": dict(ok=True, data=dict(analysis=dict(result_hours=744)))}, SimpleNamespace(mode="pre_spatial"))
+    assert raised.value.issues == [dict(code="recommendation_outside_evidence_mode", assessment_location="/recommendation/action")]
+
+
+@pytest.mark.parametrize("action,cluster_id,mode", [
+    ("request_external_evidence", 1, "pre_spatial"), ("abstain", 1, "pre_spatial"),
+    ("investigate_candidate", None, "pre_spatial"), ("review_spatial_comparison", 1, "post_spatial"),
+])
+def test_invalid_action_cluster_pairing_has_its_own_category(action, cluster_id, mode):
+    proposed = _reference_submission("/data/analysis/result_hours")
+    proposed["recommendation"].update(action=action, cluster_id=cluster_id)
+    with pytest.raises(AssessmentValidationError) as raised:
+        _check_assessment(proposed, {"R1": dict(ok=True, data=dict(analysis=dict(result_hours=744)))}, SimpleNamespace(mode=mode))
+    assert raised.value.issues == [dict(code="unexpected_cluster_recommendation", assessment_location="/recommendation/cluster_id")]
+
+
+@pytest.mark.parametrize("text,flagged", [
+    ("This is not evidence that the anomaly is a precursor or earthquake-related.", False),
+    ("This is evidence that the anomaly is a precursor.", True),
+    ("The anomaly is a precursor.", True),
+    ("This is not only evidence that the anomaly is a precursor.", True),
+    ("This is not true: it is not evidence that the anomaly is a precursor.", True),
+    ("This is not evidence that the anomaly is a precursor, but it predicts earthquakes.", True),
+    ("We cannot exclude that the anomaly is a precursor.", True),
+])
+def test_run02_precursor_negation_does_not_exempt_affirmative_or_ambiguous_claims(text, flagged):
+    assert agent_module._causal_language_requires_review(text) is flagged
+
+
+def _combined_bad_assessment():
+    proposed = _reference_submission("/data/analysis/result_hours")
+    proposed["observed_facts"][0]["value_json"] = "745"
+    proposed["recommendation"].update(action="review_spatial_comparison", cluster_id=1)
+    proposed["scientific_inferences"] = [dict(text="This is not evidence that the anomaly is a precursor.",
+        evidence=[dict(result_id="R1", pointer="/data/analysis/result_hours")])]
+    return proposed
+
+
+def test_combined_validation_errors_are_aggregated_and_distinct():
+    proposed = _combined_bad_assessment()
+    proposed["recommendation"]["evidence"].append(dict(result_id="R1", pointer="/data/missing"))
+    proposed["limitations"].append("This pattern predicts earthquakes.")
+    with pytest.raises(AssessmentValidationError) as raised:
+        _check_assessment(proposed, {"R1": dict(ok=True, data=dict(analysis=dict(result_hours=744)))}, SimpleNamespace(mode="pre_spatial"))
+    assert {p["code"] for p in raised.value.issues} == {"unsupported_observed_value", "invalid_evidence_reference",
+        "recommendation_outside_evidence_mode", "unexpected_cluster_recommendation", "causal_or_predictive_narrative_requires_review"}
+    assert not raised.value.truncated
+
+
+def test_combined_failures_allow_one_model_correction_and_preserve_evidence(pre_root, tmp_path):
+    before = {str(p): pin(p) for p in pre_root.rglob("*") if p.is_file()}
+    bad = _combined_bad_assessment()
+    good = _reference_submission("/data/analysis/result_hours")
+    good["recommendation"].update(action="request_external_evidence", cluster_id=None)
+    requests = []
+    def model(history, tools):
+        requests.append(deepcopy(history))
+        actions = tools[-1]["parameters"]["properties"]["recommendation"]["properties"]["action"]["enum"]
+        assert "review_spatial_comparison" not in actions
+        if len(requests) == 1: return [call("get_temporal_summary")]
+        if len(requests) == 2: return [call("submit_assessment", bad, "bad")]
+        assert len(requests) == 3 and [t["name"] for t in tools] == ["submit_assessment"]
+        feedback = history[-1]["output"]
+        errors = json.loads(feedback)["error"]["issues"]
+        assert {e["code"] for e in errors} == {"unsupported_observed_value", "recommendation_outside_evidence_mode", "unexpected_cluster_recommendation"}
+        assert "744" not in feedback and "745" not in feedback and str(pre_root) not in feedback
+        assert len(feedback.encode("utf-8")) <= agent_module.MAX_VALIDATION_FEEDBACK_BYTES
+        return [call("submit_assessment", good, "corrected")]
+    tools = EvidenceTools(pre_root, "pre_spatial")
+    run = run_agent(FakeModel(model), tools, "Review.", max_tool_calls=1)
+    assert run["status"] == "submitted_for_researcher_review" and run["assessment_outcome"] == "valid_corrected_submission"
+    assert run["flags"] == [] and len(run["evidence_actually_inspected"]) == 1
+    first, second = (e["calls"][0] for e in run["trace"][1:])
+    assert json.loads(first["arguments"]) == bad and json.loads(second["arguments"]) == good
+    assert first["assessment_outcome"] == "rejected_first_submission"
+    assert second["assessment_outcome"] == "valid_corrected_submission"
+    assert run["execution_eligible"] is False and run["trusted_human_authorization"] == "NOT VERIFIED"
+    assert run["windows_local_isolation"] == "NOT VERIFIED" and run["researcher_review"].startswith("REQUIRED")
+    saved = save_run(tmp_path / "combined-recovery", run, tools)
+    assert load(saved / "run_record.json")["assessment_outcome"] == "valid_corrected_submission"
+    assert len(load(saved / "agent_trace.json")) == 3
+    assert before == {str(p): pin(p) for p in pre_root.rglob("*") if p.is_file()}
+
+
+@pytest.mark.parametrize("second_kind,outcome", [("wrong_value", "rejected_second_submission"),
+    ("repeated_combination", "rejected_second_submission"), ("causal", "flagged_second_submission"),
+    ("invalid_structure", "uncorrectable_assessment_failure")])
+def test_combined_recovery_failure_has_an_explicit_final_outcome(pre_root, second_kind, outcome):
+    second = _reference_submission("/data/analysis/result_hours")
+    if second_kind == "wrong_value": second["observed_facts"][0]["value_json"] = "745"
+    if second_kind == "repeated_combination": second = _combined_bad_assessment()
+    if second_kind == "causal": second["limitations"] = ["This proves an earthquake precursor."]
+    if second_kind == "invalid_structure": second["unrecognized"] = "SECRET_SENTINEL"
+    run = run_agent(FakeModel([[call("get_temporal_summary")], [call("submit_assessment", _combined_bad_assessment(), "first")],
+        [call("submit_assessment", second, "second")], [call("submit_assessment", _reference_submission("/data/analysis/result_hours"), "never")]]),
+        EvidenceTools(pre_root, "pre_spatial"), "Review.")
+    assert run["assessment_outcome"] == outcome and len(run["trace"]) == 3
+    assert run["status"] in ("rejected_assessment", "flagged_abstention")
+    assert run["assessment"]["recommendation"]["action"] == "abstain"
+    error = run["trace"][-1]["calls"][0]["result"]["error"]
+    assert error["resubmission_allowed"] is False and error["remaining_assessment_attempts"] == 0
+    assert "SECRET_SENTINEL" not in compact(error)
+
+
+def test_validation_feedback_is_bounded_and_reports_truncation(pre_root):
+    bad = _reference_submission("/data/analysis/result_hours")
+    bad["observed_facts"] *= 24
+    for fact in bad["observed_facts"]: fact["value_json"] = "745"
+    run = run_agent(FakeModel([[call("get_temporal_summary")], [call("submit_assessment", bad, "first")],
+        [call("submit_assessment", bad, "second")]]), EvidenceTools(pre_root, "pre_spatial"), "Review.")
+    error = run["trace"][1]["calls"][0]["result"]["error"]
+    assert len(error["issues"]) == agent_module.MAX_ASSESSMENT_ISSUES and error["issues_truncated"] is True
+    assert len(compact(dict(ok=False, error=error)).encode("utf-8")) <= agent_module.MAX_VALIDATION_FEEDBACK_BYTES
+    assert "744" not in compact(error) and "745" not in compact(error)
+
+
+def test_uncorrectable_first_submission_and_valid_first_are_distinct(pre_root):
+    tools = EvidenceTools(pre_root, "pre_spatial")
+    for proposed, expected in [(submission(), "valid_first_submission"), ({}, "uncorrectable_assessment_failure")]:
+        run = run_agent(FakeModel([[call("submit_assessment", proposed, "first")], [call("get_temporal_summary", id="never")]]), tools, "Review.")
+        assert run["assessment_outcome"] == expected and len(run["trace"]) == 1
+
+
 @pytest.mark.parametrize("text,flagged", [
     ("These data establish causality.", True),
     ("This result confirms an earthquake relationship.", True),
@@ -410,13 +558,12 @@ def test_causal_language_negation_keeps_researcher_review(text, flagged):
     from src.agent.scientific_review_agent import _check_assessment, STATE
     ref = dict(result_id="R1", pointer="/data/counts")
     proposed = submission(inferences=[dict(text=text, evidence=[ref])])
-    checked, flags = _check_assessment(proposed, {"R1": dict(ok=True, data=dict(counts=3))},
-                                     SimpleNamespace(mode="pre_spatial"))
     if flagged:
-        assert flags == ["causal_or_predictive_narrative_requires_review"]
-        assert checked["recommendation"]["action"] == "abstain"
-        assert checked["scientific_inferences"] == []
+        with pytest.raises(AssessmentValidationError) as raised:
+            _check_assessment(proposed, {"R1": dict(ok=True, data=dict(counts=3))}, SimpleNamespace(mode="pre_spatial"))
+        assert [p["code"] for p in raised.value.issues] == ["causal_or_predictive_narrative_requires_review"]
     else:
+        checked, flags = _check_assessment(proposed, {"R1": dict(ok=True, data=dict(counts=3))}, SimpleNamespace(mode="pre_spatial"))
         assert flags == []
         assert checked["scientific_inferences"][0]["text"] == text
     assert STATE["researcher_review"].startswith("REQUIRED")

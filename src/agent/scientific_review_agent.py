@@ -22,6 +22,8 @@ MAX_TURNS = 10
 MAX_HISTORY_BYTES = 128 * 1024
 MAX_MODEL_BYTES = 32 * 1024
 MAX_ASSESSMENT_SUBMISSIONS = 2
+MAX_ASSESSMENT_ISSUES = 12
+MAX_VALIDATION_FEEDBACK_BYTES = 4096
 STATE = dict(windows_local_isolation="NOT VERIFIED", trusted_human_authorization="NOT VERIFIED",
              execution_eligible=False, researcher_review="REQUIRED; recommendation is not a selection or approval")
 SYSTEM = """You are a read-only scientific interpretation assistant. Choose tools yourself
@@ -43,8 +45,10 @@ historical published references from daily-policy candidates. Missing Kp, Dst an
 F10.7 cannot establish a storm explanation. A retrospective single event cannot
 establish predictive performance. Do not treat prior researcher selections as your
 own recommendations. State missing evidence and limitations explicitly.
-If a citation is rejected, one assessment-only resubmission may be available
-within the existing budgets. Check the already inspected data; never invent paths.
+If assessment validation fails, one assessment-only resubmission may be available
+within the existing budgets. Recheck all fields against already inspected data;
+never invent paths or values. Use only actions in the mode-specific submit schema.
+Only investigate_candidate may carry a cluster_id; other actions require null.
 """
 
 
@@ -67,6 +71,15 @@ ASSESSMENT_SCHEMA = object_schema(dict(
 ))
 SUBMIT = dict(type="function", name="submit_assessment", strict=True, parameters=ASSESSMENT_SCHEMA,
               description="Finish with exact observed values and citations, separate tentative interpretations, alternatives and missing evidence; abstain if unsupported.")
+
+
+def _submission_tool(mode):
+    if mode not in ("pre_spatial", "post_spatial"):
+        raise ValueError("Unknown mode")
+    tool = strict_json(compact(SUBMIT))
+    if mode == "pre_spatial":
+        tool["parameters"]["properties"]["recommendation"]["properties"]["action"]["enum"].remove("review_spatial_comparison")
+    return tool
 
 
 def _schema(value, schema):
@@ -139,11 +152,20 @@ class OpenAIModel:
                     model=response.model, usage=response.usage.model_dump() if response.usage else None)
 
 
-class AssessmentReferenceError(ValueError):
+class AssessmentValidationError(ValueError):
+    """Bounded host-generated diagnostics; no source values or model prose."""
+
+    def __init__(self, issues):
+        self.issues = issues[:MAX_ASSESSMENT_ISSUES]
+        self.truncated = len(issues) > MAX_ASSESSMENT_ISSUES
+        super().__init__(self.issues[0]["code"])
+
+
+class AssessmentReferenceError(AssessmentValidationError):
     """A correctable citation failure; expose only a host-generated field location."""
 
-    def __init__(self, location):
-        super().__init__("invalid_evidence_reference")
+    def __init__(self, location, issues=None):
+        super().__init__(issues if issues is not None else [dict(code="invalid_evidence_reference", assessment_location=location)])
         self.location = location
 
 
@@ -177,6 +199,8 @@ def _causal_language_requires_review(text):
     for claim in re.finditer(r"\b(proves?|confirms?|establish(?:es)?|caused by|causes?|is a precursor|predicts?)\b", text, re.I):
         prefix = re.split(r"[.!?;]", text[:claim.start()])[-1]
         negation = re.search(r"\b(?:do(?:es)? not|did not|cannot|can not|could not)\s+$", prefix, re.I)
+        if negation is None and claim.group(0).lower() == "is a precursor":
+            negation = re.search(r"\bnot evidence that the anomaly\s+$", prefix, re.I)
         # Do not let an earlier or outer negation turn ambiguous double negation
         # into an exemption. Check every matched claim, including later clauses.
         if negation is None or re.search(r"\b(?:not|never|cannot)\b|n['’]t\b", prefix[:negation.start()], re.I):
@@ -187,43 +211,63 @@ def _causal_language_requires_review(text):
 def _check_assessment(proposed, results, tools):
     _schema(proposed, ASSESSMENT_SCHEMA)
     checked = strict_json(compact(proposed))
+    issues = []
+    def issue(code, location):
+        # Keep one overflow marker, so feedback can disclose truncation.
+        if len(issues) <= MAX_ASSESSMENT_ISSUES:
+            issues.append(dict(code=code, assessment_location=location))
+    def resolve(ref, location):
+        try:
+            return True, _resolve(ref, results, location)
+        except AssessmentReferenceError:
+            issue("invalid_evidence_reference", location)
+            return False, None
     for index, fact in enumerate(checked["observed_facts"]):
-        actual = _resolve(fact, results, f"/observed_facts/{index}")
-        claimed = strict_json(fact.pop("value_json"))
-        if compact(actual) != compact(claimed):
-            raise ValueError("unsupported_observed_value")
-        fact["value"] = actual
-    narratives = checked["scientific_inferences"] + checked["alternative_explanations"]
+        location = f"/observed_facts/{index}"
+        resolved, actual = resolve(fact, location)
+        try:
+            claimed = strict_json(fact.pop("value_json"))
+        except (ValueError, TypeError, RecursionError):
+            issue("invalid_observed_value_json", location + "/value_json")
+            continue
+        if resolved and compact(actual) != compact(claimed):
+            issue("unsupported_observed_value", location + "/value_json")
+        elif resolved:
+            fact["value"] = actual
     r = checked["recommendation"]
+    narratives = []
     for section in ("scientific_inferences", "alternative_explanations"):
         for index, item in enumerate(checked[section]):
+            narratives.append((f"/{section}/{index}/text", item["text"]))
             for ref_index, ref in enumerate(item["evidence"]):
-                _resolve(ref, results, f"/{section}/{index}/evidence/{ref_index}")
+                resolve(ref, f"/{section}/{index}/evidence/{ref_index}")
     for index, ref in enumerate(r["evidence"]):
-        _resolve(ref, results, f"/recommendation/evidence/{index}")
-    flags = []
-    for text in [x["text"] for x in narratives] + [r["rationale"], *checked["missing_evidence"],
-                                                   *checked["uncertainties"], *checked["limitations"]]:
-        # Deliberately conservative: numerical assertions belong in checked facts.
-        stripped = text.replace("F10.7", "solar radio flux")
-        if re.search(r"\d", stripped):
-            flags.append("unchecked_numerical_narrative")
-        if _causal_language_requires_review(text):
-            flags.append("causal_or_predictive_narrative_requires_review")
-    if r["action"] != "abstain" and (not r["evidence"] or not checked["observed_facts"]):
-        flags.append("recommendation_without_checked_observations")
-    if r["action"] == "investigate_candidate":
+        resolve(ref, f"/recommendation/evidence/{index}")
+    if tools.mode == "pre_spatial" and r["action"] == "review_spatial_comparison":
+        issue("recommendation_outside_evidence_mode", "/recommendation/action")
+    if (r["action"] == "investigate_candidate") != (r["cluster_id"] is not None):
+        issue("unexpected_cluster_recommendation", "/recommendation/cluster_id")
+    if r["action"] == "investigate_candidate" and r["cluster_id"] is not None:
         candidates = [candidate for result in results.values() if result.get("ok")
                       for candidate in result.get("data", {}).get("candidates", [])]
         if not any(c["anchor"]["cluster_id"] == r["cluster_id"] and c["status"] == "candidate" for c in candidates):
-            flags.append("candidate_not_inspected_or_ineligible")
-    elif r["cluster_id"] is not None:
-        flags.append("unexpected_cluster_recommendation")
-    if tools.mode == "pre_spatial" and r["action"] == "review_spatial_comparison":
-        flags.append("recommendation_outside_evidence_mode")
-    if flags:
-        # Keep the attempted submission in the trace, not as accepted scientific prose.
-        return _abstention("Assessment flagged for unsupported claims; researcher review required."), sorted(set(flags))
+            issue("candidate_not_inspected_or_ineligible", "/recommendation/cluster_id")
+    if r["action"] != "abstain" and (not r["evidence"] or not checked["observed_facts"]):
+        issue("recommendation_without_checked_observations", "/recommendation/evidence")
+    narratives.append(("/recommendation/rationale", r["rationale"]))
+    for section in ("missing_evidence", "uncertainties", "limitations"):
+        narratives.extend((f"/{section}/{index}", text) for index, text in enumerate(checked[section]))
+    for location, text in narratives:
+        # Deliberately conservative: numerical assertions belong in checked facts.
+        stripped = text.replace("F10.7", "solar radio flux")
+        if re.search(r"\d", stripped):
+            issue("unchecked_numerical_narrative", location)
+        if _causal_language_requires_review(text):
+            issue("causal_or_predictive_narrative_requires_review", location)
+    if issues:
+        if issues[0]["code"] == "invalid_evidence_reference":
+            raise AssessmentReferenceError(issues[0]["assessment_location"], issues)
+        raise AssessmentValidationError(issues)
     return checked, []
 
 
@@ -234,17 +278,19 @@ def run_agent(model, evidence, question, *, max_tool_calls=MAX_TOOL_CALLS):
     if type(max_tool_calls) is not int or not 1 <= max_tool_calls <= MAX_TOOL_CALLS:
         raise ValueError("Tool budget must be between one and eight")
     history = [dict(role="system", content=SYSTEM + "\nMode: " + evidence.mode), dict(role="user", content=question)]
-    tool_specs = definitions(evidence.mode) + [SUBMIT]
+    submit_tool = _submission_tool(evidence.mode)
+    tool_specs = definitions(evidence.mode) + [submit_tool]
     trace, results, ids = [], {}, set()
     tool_count, flags, status = 0, [], "abstained"
     assessment_submissions = 0
+    assessment_outcome = "no_valid_assessment"
     assessment = _abstention("Model did not submit a grounded assessment within the bounded loop.")
     for turn in range(MAX_TURNS):
         if len(compact(history).encode("utf-8")) > MAX_HISTORY_BYTES:
             flags.append("history_limit")
             break
         try:
-            response = model.respond(history, [SUBMIT] if assessment_submissions else tool_specs)
+            response = model.respond(history, [submit_tool] if assessment_submissions else tool_specs)
         except Exception:
             # Provider errors may include credentials, endpoints or prompts. Never log them.
             flags.append("model_adapter_error")
@@ -280,18 +326,26 @@ def run_agent(model, evidence, question, *, max_tool_calls=MAX_TOOL_CALLS):
             try:
                 assessment, flags = _check_assessment(strict_json(call["arguments"]), results, evidence)
                 status = "flagged_abstention" if flags else "submitted_for_researcher_review"
+                assessment_outcome = "valid_first_submission" if assessment_submissions == 1 else "valid_corrected_submission"
                 entry["status"] = status
-            except AssessmentReferenceError as exc:
-                flags.append("invalid_or_unsupported_assessment")
-                status = "rejected_assessment"
+                entry["assessment_outcome"] = assessment_outcome
+            except AssessmentValidationError as exc:
+                flags = sorted({problem["code"] for problem in exc.issues})
+                soft_codes = {"unchecked_numerical_narrative", "causal_or_predictive_narrative_requires_review"}
+                status = "flagged_abstention" if set(flags) <= soft_codes else "rejected_assessment"
+                assessment = _abstention("Assessment failed validation; researcher review required.")
+                assessment_outcome = ("flagged" if status == "flagged_abstention" else "rejected") + (
+                    "_first_submission" if assessment_submissions == 1 else "_second_submission")
                 entry["status"] = status
+                entry["assessment_outcome"] = assessment_outcome
                 can_retry = assessment_submissions < MAX_ASSESSMENT_SUBMISSIONS and turn + 1 < MAX_TURNS
-                error = dict(code="invalid_evidence_reference", assessment_location=exc.location,
-                    message="Cite an existing field under /data/ in a successful, already inspected tool result. No reference was repaired.",
+                error = dict(**exc.issues[0], issues=exc.issues, issues_truncated=exc.truncated,
+                    message="Recheck all listed fields and other citations against already inspected evidence and the mode-specific submit schema. No values, references or actions were repaired.",
                     resubmission_allowed=can_retry, remaining_assessment_attempts=int(can_retry))
                 feedback = dict(type="function_call_output", call_id=call["call_id"],
                                 output=compact(dict(ok=False, error=error)))
-                if len(compact(history + [feedback]).encode("utf-8")) > MAX_HISTORY_BYTES:
+                if (len(feedback["output"].encode("utf-8")) > MAX_VALIDATION_FEEDBACK_BYTES or
+                        len(compact(history + [feedback]).encode("utf-8")) > MAX_HISTORY_BYTES):
                     can_retry = False
                     error.update(resubmission_allowed=False, remaining_assessment_attempts=0)
                 entry["result"] = dict(ok=False, error=error)
@@ -301,7 +355,11 @@ def run_agent(model, evidence, question, *, max_tool_calls=MAX_TOOL_CALLS):
             except (ValueError, KeyError, TypeError, IndexError, OverflowError, RecursionError):
                 flags.append("invalid_or_unsupported_assessment")
                 status = "rejected_assessment"
+                assessment_outcome = "uncorrectable_assessment_failure"
                 entry["status"] = status
+                entry["assessment_outcome"] = assessment_outcome
+                entry["result"] = dict(ok=False, error=dict(code="invalid_assessment_structure", assessment_location="/",
+                    resubmission_allowed=False, remaining_assessment_attempts=0))
             break
         if tool_count >= max_tool_calls:
             flags.append("tool_budget_exhausted")
@@ -319,9 +377,11 @@ def run_agent(model, evidence, question, *, max_tool_calls=MAX_TOOL_CALLS):
         evidence.recheck()
     except (OSError, ValueError):
         assessment, status = _abstention("Evidence changed during this run."), "rejected_evidence_changed"
+        assessment_outcome = "rejected_evidence_changed"
         flags.append("evidence_changed")
     return dict(case_id="afghanistan_2022", question=question, mode=evidence.mode, model=model.config,
-                status=status, flags=flags, assessment=assessment, evidence_actually_inspected=list(results.values()),
+                status=status, assessment_outcome=assessment_outcome, flags=flags, assessment=assessment,
+                evidence_actually_inspected=list(results.values()),
                 budgets=dict(tool_calls=max_tool_calls, turns=MAX_TURNS, history_bytes=MAX_HISTORY_BYTES,
                              assessment_submissions=MAX_ASSESSMENT_SUBMISSIONS),
                 trace=trace, **STATE,
@@ -331,7 +391,7 @@ def run_agent(model, evidence, question, *, max_tool_calls=MAX_TOOL_CALLS):
 def render_report(run):
     lines = ["# Scientific assessment", "", f"Mode: {run['mode']}; provider: {run['model']['provider']}; model: {run['model']['model']}.",
              "", run["question"], "", f"Status: {run['status']}. Researcher review REQUIRED.",
-             "", "Observed facts (exact tool values):"]
+             "", "Assessment outcome: " + run.get("assessment_outcome", "not_recorded"), "", "Observed facts (exact tool values):"]
     for fact in run["assessment"]["observed_facts"]:
         lines += [f"- {fact['result_id']} {fact['pointer']}: {compact(fact['value'])}"]
     for key in ("scientific_inferences", "alternative_explanations", "missing_evidence", "uncertainties", "limitations"):
@@ -373,6 +433,7 @@ def save_run(output_dir, run, evidence):
     code = {name: _metadata((source_root / name).read_bytes()) for name in (
         "src/agent/scientific_review_agent.py", "src/agent/scientific_evidence_tools.py", "examples/run_afghanistan_mvp_agent.py")}
     record = dict(record_type="scientific_agent_review_run", schema_version=1, model=run["model"], status=run["status"],
+                  assessment_outcome=run["assessment_outcome"],
                   source_snapshots=evidence.sources, availability=evidence.status, artifacts=pins, code=code,
                   environment=dict(python=platform.python_version(), numpy=version("numpy")),
                   raw_scientific_sources="Recorded source hashes only; raw GIM/TEC/catalog paths were not opened.",
