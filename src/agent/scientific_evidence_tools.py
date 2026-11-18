@@ -11,12 +11,14 @@ from types import SimpleNamespace
 from zipfile import ZipFile, BadZipFile
 import json
 import math
+import stat
 
 import numpy as np
 
 from examples import select_afghanistan_mvp_window as handoff
 from examples import compare_afghanistan_mvp_spatial as saved_spatial
 from src.workflow.explicit_window import select_explicit_window
+from .epz_evidence import host_binding, validate_report
 
 
 MODES = ("pre_spatial", "post_spatial")
@@ -51,7 +53,7 @@ def _tool(name, description, properties=None):
                 parameters=object_schema(properties or {}))
 
 
-def definitions(mode):
+def definitions(mode, *, epz_available=False):
     if mode not in MODES:
         raise ValueError("Unknown mode")
     result = [
@@ -71,11 +73,19 @@ def definitions(mode):
                   dict(latitude=dict(type="number", minimum=-90, maximum=90),
                        longitude=dict(type="number", minimum=-180, maximum=180))),
         ]
+        if epz_available:
+            result.append(_tool("get_epz_diagnostic_summary", "Read the host-pinned saved EPZ Diagnostic V1: shared grid-center membership, global peaks, per-center A/B counts, denominators, regional summaries and limitations. No geometry or scientific execution."))
     return result
 
 
 class EvidenceError(ValueError):
     pass
+
+
+def _redirected(path):
+    info = path.lstat()
+    return path.is_symlink() or bool(getattr(info, "st_file_attributes", 0) &
+                                    getattr(stat, "FILE_ATTRIBUTE_REPARSE_POINT", 0))
 
 
 class EvidenceTools:
@@ -85,9 +95,16 @@ class EvidenceTools:
     Missing/corrupt bundles remain unavailable; they are not synthesized.
     """
 
-    def __init__(self, evidence_root, mode):
+    def __init__(self, evidence_root, mode, *, epz_diagnostic=None, epz_sha256=None, epz_size_bytes=None):
         if mode not in MODES:
             raise ValueError("Unknown mode")
+        # Reject Pre bindings (including partial bindings) before any path lookup.
+        self.epz_binding = host_binding(mode, epz_diagnostic, epz_sha256, epz_size_bytes, MAX_FILE_BYTES)
+        self.epz_projection = None
+        if self.epz_binding is not None:
+            requested_root = Path(evidence_root).absolute()
+            if any(_redirected(p) for p in (requested_root, *requested_root.parents)):
+                raise EvidenceError("redirected_evidence_root")
         self.root = Path(evidence_root).resolve(strict=True)
         self.mode = mode
         self.sources, self.raw, self.arrays = {}, {}, {}
@@ -114,15 +131,30 @@ class EvidenceTools:
                     self.status["spatial"] = "validated_snapshot"
                 except (OSError, ValueError, KeyError, TypeError, OverflowError, EOFError, BadZipFile, StopIteration, RecursionError):
                     self.arrays.clear()
+            if self.epz_binding is not None:
+                self.status["epz_diagnostic"] = "unavailable_or_invalid"
+                if self.status["spatial"] == "validated_snapshot":
+                    identity = self.epz_binding["artifact"]
+                    try:
+                        # A self-computed hash is not approval: compare host pins first.
+                        raw = self._bytes(identity)
+                        handoff._same(handoff._metadata(raw), {k: self.epz_binding[k] for k in ("sha256", "size_bytes")}, "host EPZ pin")
+                        self.epz_projection = validate_report(strict_json(raw), self)
+                        # Register only after validation, so source maps exclude the report itself.
+                        self.raw[identity], self.sources[identity] = raw, handoff._metadata(raw)
+                        self.recheck()
+                        self.status["epz_diagnostic"] = "validated_snapshot"
+                    except (OSError, ValueError, KeyError, TypeError, IndexError, OverflowError, RecursionError):
+                        self.epz_projection = None
 
     def _path(self, identity):
-        # Only internal constants reach this method. Refuse redirected components.
+        # Internal constants or a validated host-only identity; never model paths.
         path = self.root
         for part in identity.split("/"):
             if part in ("", ".", ".."):
                 raise EvidenceError("invalid_identity")
             path = path / part
-            if path.is_symlink() or (hasattr(path, "is_junction") and path.is_junction()):
+            if _redirected(path):
                 raise EvidenceError("redirected_evidence")
         if not path.resolve(strict=True).is_relative_to(self.root):
             raise EvidenceError("redirected_evidence")
@@ -296,9 +328,16 @@ class EvidenceTools:
     def _refs(self, *identities):
         return [dict(artifact=identity, **self.sources[identity]) for identity in identities]
 
+    def tool_definitions(self):
+        """Advertise EPZ only after this host binding validated successfully."""
+        return definitions(self.mode, epz_available=(self.epz_binding is not None
+            and self.epz_projection is not None and self.status.get("epz_diagnostic") == "validated_snapshot"))
+
     def call(self, name, arguments):
         """No exceptions or source-recorded strings escape as tool errors."""
-        allowed = {t["name"]: t for t in definitions(self.mode)}
+        # Direct Post-Spatial EPZ calls still fail as unavailable when unbound/invalid.
+        # This dispatch catalog is distinct from the model's advertised definitions.
+        allowed = {t["name"]: t for t in definitions(self.mode, epz_available=True)}
         if name not in allowed:
             return dict(ok=False, error="tool_not_allowed")
         try:
@@ -327,6 +366,8 @@ class EvidenceTools:
                 (name in {"get_spatial_experiment_summary", "compare_spatial_experiments", "inspect_spatial_grid_cell"}
                  and self.status.get("spatial") != "validated_snapshot")):
             return dict(ok=False, error="evidence_unavailable")
+        if name == "get_epz_diagnostic_summary" and self.status.get("epz_diagnostic") != "validated_snapshot":
+            return dict(ok=False, error="evidence_unavailable")
         try:
             self.recheck()
         except (ValueError, OSError):
@@ -342,6 +383,10 @@ class EvidenceTools:
 
     def _dispatch(self, name, args):
         pre = PRE_ROOT + "/"
+        if name == "get_epz_diagnostic_summary":
+            refs = self._refs(self.epz_binding["artifact"], POST_ROOT + "/comparison_summary.json",
+                *(POST_ROOT + "/" + n + "/spatial_arrays.npz" for n in EXPERIMENTS.values()))
+            return dict(**self.epz_projection, diagnostic_identity=dict(self.epz_binding)), refs
         if name == "get_evidence_inventory":
             return dict(mode=self.mode, availability=self.status, external_indices=dict(Kp="unavailable", Dst="unavailable", F10_7="unavailable"),
                         verification="snapshot consistency only; origin and raw-source custody not authenticated"), []

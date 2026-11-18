@@ -13,7 +13,7 @@ import platform
 import re
 
 from src.agent.scientific_evidence_tools import (
-    EvidenceTools, compact, definitions, object_schema, strict_json,
+    EvidenceTools, compact, object_schema, strict_json,
 )
 
 
@@ -279,7 +279,7 @@ def run_agent(model, evidence, question, *, max_tool_calls=MAX_TOOL_CALLS):
         raise ValueError("Tool budget must be between one and eight")
     history = [dict(role="system", content=SYSTEM + "\nMode: " + evidence.mode), dict(role="user", content=question)]
     submit_tool = _submission_tool(evidence.mode)
-    tool_specs = definitions(evidence.mode) + [submit_tool]
+    tool_specs = evidence.tool_definitions() + [submit_tool]
     trace, results, ids = [], {}, set()
     tool_count, flags, status = 0, [], "abstained"
     assessment_submissions = 0
@@ -407,6 +407,8 @@ def render_report(run):
 def validate_output_dir(output_dir, evidence):
     target = Path(output_dir).resolve()
     protected = [evidence.root / name for name in ("afghanistan_mvp01_review", "afghanistan_mvp02b_comparison", "afghanistan_mvp02b_selections")]
+    if evidence.epz_binding is not None:
+        protected.append((evidence.root / evidence.epz_binding["artifact"]).parent)
     if any(target.is_relative_to(root.resolve()) for root in protected):
         raise ValueError("Output must be outside accepted evidence bundles")
     if target.exists():
@@ -431,13 +433,16 @@ def save_run(output_dir, run, evidence):
         pins[name] = _metadata(raw)
     source_root = Path(__file__).resolve().parents[2]
     code = {name: _metadata((source_root / name).read_bytes()) for name in (
-        "src/agent/scientific_review_agent.py", "src/agent/scientific_evidence_tools.py", "examples/run_afghanistan_mvp_agent.py")}
+        "src/agent/scientific_review_agent.py", "src/agent/scientific_evidence_tools.py",
+        "src/agent/epz_evidence.py", "examples/run_afghanistan_mvp_agent.py")}
     record = dict(record_type="scientific_agent_review_run", schema_version=1, model=run["model"], status=run["status"],
                   assessment_outcome=run["assessment_outcome"],
                   source_snapshots=evidence.sources, availability=evidence.status, artifacts=pins, code=code,
                   environment=dict(python=platform.python_version(), numpy=version("numpy")),
                   raw_scientific_sources="Recorded source hashes only; raw GIM/TEC/catalog paths were not opened.",
                   live_model_called=run["model"]["live"], **STATE)
+    if evidence.epz_binding is not None:
+        record["epz_binding"] = dict(evidence.epz_binding)
     if evidence.bundle is not None:
         from pathlib import PureWindowsPath
         inputs = evidence.bundle["record"]["inputs"]
