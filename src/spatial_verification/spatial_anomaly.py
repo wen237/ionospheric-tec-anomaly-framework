@@ -14,7 +14,24 @@ class SpatialAnomalyResult:
     window_steps: int
 
 
-def compute_spatial_anomalies(
+@dataclass(frozen=True)
+class HourlySpatialAnomalies:
+    """Detector observations before aggregation, in the supplied grid order.
+
+    Positive/negative are zero, one or NaN, exactly as used by Framework D.
+    Evaluated (non-NaN) decisions and finite-input/threshold diagnostics are
+    deliberately separate. Neither changes the full-window ratio denominator.
+    """
+
+    positive: np.ndarray
+    negative: np.ndarray
+    target_finite: np.ndarray
+    reference_finite_counts: np.ndarray
+    positive_finite: np.ndarray
+    negative_finite: np.ndarray
+
+
+def compute_hourly_spatial_anomalies(
     tec: np.ndarray,
     samples_per_day: int,
     reference_days: int,
@@ -22,8 +39,8 @@ def compute_spatial_anomalies(
     k: float,
     latitudes: np.ndarray,
     longitudes: np.ndarray,
-) -> SpatialAnomalyResult:
-    """Compute spatial TEC anomaly counts and occurrence proportions.
+) -> HourlySpatialAnomalies:
+    """Expose the existing detector's hourly decisions without aggregation.
 
     The reference distribution for each target observation is constructed
     from the same time-of-day samples over the preceding reference days.
@@ -96,6 +113,33 @@ def compute_spatial_anomalies(
         np.nan,
         (observed < lower_bound).astype(float),
     )
+
+    return HourlySpatialAnomalies(
+        positive=positive,
+        negative=negative,
+        target_finite=np.isfinite(observed),
+        reference_finite_counts=np.isfinite(reference).sum(axis=2),
+        positive_finite=np.isfinite(observed) & np.isfinite(upper_bound),
+        negative_finite=np.isfinite(observed) & np.isfinite(lower_bound),
+    )
+
+
+def compute_spatial_anomalies(
+    tec: np.ndarray,
+    samples_per_day: int,
+    reference_days: int,
+    window_steps: int,
+    k: float,
+    latitudes: np.ndarray,
+    longitudes: np.ndarray,
+) -> SpatialAnomalyResult:
+    """Aggregate the shared detector with the original full-hour denominator."""
+    hourly = compute_hourly_spatial_anomalies(
+        tec, samples_per_day, reference_days, window_steps, k, latitudes, longitudes,
+    )
+    latitudes = np.asarray(latitudes, dtype=float)
+    longitudes = np.asarray(longitudes, dtype=float)
+    positive, negative = hourly.positive, hourly.negative
 
     positive_counts = np.nansum(
         positive,

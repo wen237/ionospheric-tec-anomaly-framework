@@ -45,6 +45,10 @@ and Agent-controlled Framework D remains prohibited.
 
 See the [public HITL MVP guide](docs/e2e_hitl_mvp.md) for entry points, input
 requirements, current Agent limits, offline tests and reproducibility boundaries.
+
+The opt-in [Scientific Reasoning Enhancement](docs/scientific_reasoning_enhancement.md)
+adds saved hourly window diagnostics, offline Kp/Dst/F10.7 evidence and bounded,
+cited follow-up experiment proposals for human review. Agent tools remain read-only.
 Scientific inputs, local Handoffs, live traces and experiment outputs are not
 distributed with this software checkpoint.
 

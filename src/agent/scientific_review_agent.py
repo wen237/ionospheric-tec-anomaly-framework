@@ -109,10 +109,16 @@ SUBMIT = dict(type="function", name="submit_assessment", strict=True, parameters
               description="Finish with exact cited observations, separate framework-consistent interpretations from physical attribution and alternatives; abstain when evidence is insufficient for the requested framework-level decision.")
 
 
-def _submission_tool(mode):
+def _submission_tool(mode, *, reasoning_enabled=False):
     if mode not in ("pre_spatial", "post_spatial"):
         raise ValueError("Unknown mode")
     tool = strict_json(compact(SUBMIT))
+    if reasoning_enabled:
+        from .follow_up_experiments import PROPOSALS_SCHEMA
+        schema = tool["parameters"]
+        schema["properties"]["follow_up_experiments"] = strict_json(compact(PROPOSALS_SCHEMA))
+        schema["required"].append("follow_up_experiments")
+        schema["properties"]["recommendation"]["properties"]["action"]["enum"].append("propose_follow_up")
     if mode == "pre_spatial":
         tool["parameters"]["properties"]["recommendation"]["properties"]["action"]["enum"].remove("review_spatial_comparison")
     return tool
@@ -121,7 +127,7 @@ def _submission_tool(mode):
 def _schema(value, schema):
     """Validate this small closed schema locally; provider strict mode is not trust."""
     types = schema["type"] if isinstance(schema["type"], list) else [schema["type"]]
-    native = {"object": dict, "array": list, "string": str, "integer": int, "null": type(None)}
+    native = {"object": dict, "array": list, "string": str, "integer": int, "boolean": bool, "null": type(None)}
     if not any(type(value) is native[t] for t in types):
         raise ValueError("invalid_assessment_schema")
     if "enum" in schema and value not in schema["enum"]:
@@ -136,7 +142,9 @@ def _schema(value, schema):
             raise ValueError("invalid_assessment_schema")
         for item in value:
             _schema(item, schema["items"])
-    if isinstance(value, str) and len(value) > schema.get("maxLength", 1600):
+    if isinstance(value, str) and (len(value.strip()) < schema.get("minLength", 0) or len(value) > schema.get("maxLength", 1600)):
+        raise ValueError("invalid_assessment_schema")
+    if type(value) is int and not schema.get("minimum", value) <= value <= schema.get("maximum", value):
         raise ValueError("invalid_assessment_schema")
 
 
@@ -309,8 +317,8 @@ def _causal_language_requires_review(text):
     return False
 
 
-def _check_assessment(proposed, results, tools):
-    _schema(proposed, ASSESSMENT_SCHEMA)
+def _check_assessment(proposed, results, tools, *, reasoning_enabled=False):
+    _schema(proposed, _submission_tool("post_spatial", reasoning_enabled=reasoning_enabled)["parameters"])
     checked = strict_json(compact(proposed))
     issues = []
     def issue(code, location):
@@ -358,6 +366,9 @@ def _check_assessment(proposed, results, tools):
     narratives.append(("/recommendation/rationale", r["rationale"]))
     for section in ("missing_evidence", "uncertainties", "limitations"):
         narratives.extend((f"/{section}/{index}", text) for index, text in enumerate(checked[section]))
+    if reasoning_enabled:
+        from .follow_up_experiments import check_proposals
+        narratives.extend(check_proposals(checked, results, resolve, issue))
     for location, text in narratives:
         # Deliberately conservative: numerical assertions belong in checked facts.
         stripped = text.replace("F10.7", "solar radio flux")
@@ -372,14 +383,37 @@ def _check_assessment(proposed, results, tools):
     return checked, []
 
 
-def run_agent(model, evidence, question, *, max_tool_calls=MAX_TOOL_CALLS):
+def run_agent(model, evidence, question, *, max_tool_calls=MAX_TOOL_CALLS, reasoning_enabled=None):
     """The model selects every retrieval; no evidence is prefetched into prompts."""
     if type(question) is not str or not question.strip() or len(question.encode("utf-8")) > 8000:
         raise ValueError("Question must contain at most 8000 UTF-8 bytes")
     if type(max_tool_calls) is not int or not 1 <= max_tool_calls <= MAX_TOOL_CALLS:
         raise ValueError("Tool budget must be between one and eight")
-    history = [dict(role="system", content=SYSTEM + "\nMode: " + evidence.mode), dict(role="user", content=question)]
-    submit_tool = _submission_tool(evidence.mode)
+    if reasoning_enabled is None:
+        reasoning_enabled = bool(getattr(evidence, "reasoning_bindings", {}))
+    if type(reasoning_enabled) is not bool:
+        raise ValueError("reasoning_enabled must be boolean")
+    reasoning_instructions = """
+Scientific reasoning is enabled. Inspect saved window contribution and space-weather
+tools when relevant, then propose at most three bounded follow-up experiments in
+follow_up_experiments. Include the question, checked supporting evidence, reason,
+experiment, inspected proposed windows, evaluation criteria, limitations and required
+human approval. Proposals are not selections or authorization. Do not execute any
+detector or Framework D. A nested-window proposal requires actual hourly evidence;
+aggregate spatial counts cannot identify individual anomalous hours. Compare the
+share of added hours with their anomaly contribution, validity and spatial context.
+Keep both independently motivated windows under review; never select a shorter
+window because it fits an earthquake hypothesis. Missing space-weather observations
+remain unknown, and index coincidence does not establish causal attribution.
+Proposed-window timestamps and durations belong only in their structured fields;
+all other numerical assertions still require exact observed_facts citations.
+Use propose_follow_up with null cluster_id when proposing experiments. An empty
+proposal list is appropriate when evidence is insufficient. Reassessment inspects
+new host-approved saved results through the same read-only tools; this run cannot
+approve, produce or execute a future experiment.
+""" if reasoning_enabled else ""
+    history = [dict(role="system", content=SYSTEM + reasoning_instructions + "\nMode: " + evidence.mode), dict(role="user", content=question)]
+    submit_tool = _submission_tool(evidence.mode, reasoning_enabled=reasoning_enabled)
     tool_specs = evidence.tool_definitions() + [submit_tool]
     trace, results, ids = [], {}, set()
     tool_count, flags, status = 0, [], "abstained"
@@ -472,7 +506,7 @@ def run_agent(model, evidence, question, *, max_tool_calls=MAX_TOOL_CALLS):
             assessment_submissions += 1
             entry["submission_attempt"] = assessment_submissions
             try:
-                assessment, flags = _check_assessment(strict_json(call["arguments"]), results, evidence)
+                assessment, flags = _check_assessment(strict_json(call["arguments"]), results, evidence, reasoning_enabled=reasoning_enabled)
                 status = "flagged_abstention" if flags else "submitted_for_researcher_review"
                 assessment_outcome = "valid_first_submission" if assessment_submissions == 1 else "valid_corrected_submission"
                 entry["status"] = status
@@ -532,7 +566,11 @@ def run_agent(model, evidence, question, *, max_tool_calls=MAX_TOOL_CALLS):
         assessment, status = _abstention("Evidence changed during this run."), "rejected_evidence_changed"
         assessment_outcome = "rejected_evidence_changed"
         flags.append("evidence_changed")
-    return dict(case_id="afghanistan_2022", question=question, mode=evidence.mode, model=model.config,
+    bundle = getattr(evidence, "bundle", None)
+    case_id = bundle["record"]["case_id"] if bundle is not None else "afghanistan_2022"
+    if reasoning_enabled:
+        assessment.setdefault("follow_up_experiments", [])
+    return dict(case_id=case_id, question=question, mode=evidence.mode, model=model.config,
                 status=status, assessment_outcome=assessment_outcome, flags=flags, assessment=assessment,
                 evidence_actually_inspected=list(results.values()),
                 budgets=dict(tool_calls=max_tool_calls, turns=MAX_TURNS, history_bytes=MAX_HISTORY_BYTES,
@@ -554,6 +592,9 @@ def render_report(run):
     lines += ["", "Recommendation (no execution authority): " + compact(run["assessment"]["recommendation"]),
               "", "Flags: " + compact(run["flags"]), "", run["reasoning_validation"], "",
               "Windows Local Isolation: NOT VERIFIED", "Trusted Human Authorization: NOT VERIFIED", "Execution Eligibility: FALSE", ""]
+    if "follow_up_experiments" in run["assessment"]:
+        lines += ["Follow-up experiments (human approval required):", ""]
+        lines.extend("- " + compact(proposal) for proposal in run["assessment"]["follow_up_experiments"])
     return "\n".join(lines)
 
 
@@ -562,6 +603,7 @@ def validate_output_dir(output_dir, evidence):
     protected = [evidence.root / name for name in ("afghanistan_mvp01_review", "afghanistan_mvp02b_comparison", "afghanistan_mvp02b_selections")]
     if evidence.epz_binding is not None:
         protected.append((evidence.root / evidence.epz_binding["artifact"]).parent)
+    protected.extend((evidence.root / pin["artifact"]).parent for pin in getattr(evidence, "reasoning_bindings", {}).values())
     if any(target.is_relative_to(root.resolve()) for root in protected):
         raise ValueError("Output must be outside accepted evidence bundles")
     if target.exists():
@@ -588,6 +630,10 @@ def save_run(output_dir, run, evidence):
     code = {name: _metadata((source_root / name).read_bytes()) for name in (
         "src/agent/scientific_review_agent.py", "src/agent/scientific_evidence_tools.py",
         "src/agent/epz_evidence.py", "examples/run_afghanistan_mvp_agent.py")}
+    if "follow_up_experiments" in run["assessment"]:
+        code.update({name: _metadata((source_root / name).read_bytes()) for name in (
+            "src/agent/reasoning_evidence.py", "src/agent/follow_up_experiments.py",
+            "src/workflow/window_sensitivity.py", "src/workflow/space_weather_evidence.py")})
     record = dict(record_type="scientific_agent_review_run", schema_version=1, model=run["model"], status=run["status"],
                   assessment_outcome=run["assessment_outcome"],
                   source_snapshots=evidence.sources, availability=evidence.status, artifacts=pins, code=code,
@@ -596,6 +642,8 @@ def save_run(output_dir, run, evidence):
                   live_model_called=run["model"]["live"], **STATE)
     if evidence.epz_binding is not None:
         record["epz_binding"] = dict(evidence.epz_binding)
+    if getattr(evidence, "reasoning_bindings", {}):
+        record["reasoning_bindings"] = evidence.reasoning_bindings
     if evidence.bundle is not None:
         from pathlib import PureWindowsPath
         inputs = evidence.bundle["record"]["inputs"]
