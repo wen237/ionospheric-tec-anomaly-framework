@@ -1,0 +1,2 @@
+# Optional live Agent only. Core scientific/offline tests do not import this SDK.
+openai>=2.0.0,<3.0.0
