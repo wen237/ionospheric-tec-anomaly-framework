@@ -45,10 +45,68 @@ recorded external source paths or verify their accessibility:
   Post evaluation**, their permitted evidence sharing and cost scope. Configure
   credentials privately outside this record. Do not print a key, inspect secret
   files, dump environment variables or put credentials in commands/artifacts.
-- Independent review of applicable local-machine/security prerequisites before
-  D execution. A JSON decision, hash, successful process or this runbook does not
-  authenticate a human or prove isolation. Codex, the Agent and Stage 2 receive
-  no authority to execute D.
+- Review of the execution profile and its applicable prerequisites in section
+  1.1 before D execution. A JSON decision, hash, successful process or this runbook
+  does not authenticate a human or prove isolation. Codex, the Agent and Stage 2
+  receive no authority to execute D.
+
+### 1.1. Execution profiles and E2E-03 policy clarification
+
+**Policy revision: 2026-11-19. Researcher review required before application.**
+This revision replaces the blanket independent local-security prerequisite above
+with the two profiles below. It changes documentation only: no active approval,
+STOP, security flag or scientific execution status changes automatically.
+
+**Researcher-Personal Local Scientific Execution**
+(`researcher_personal_local_scientific_execution`) is a single-researcher MVP
+profile in which the researcher personally invokes the reviewed scientific
+entry point on their declared local machine. Require all of the following:
+
+1. An explicit researcher decision approving this profile and the exact run.
+2. Fixed reviewed experiment scope, A/B selection and Plan artifact pins, UTC
+   windows, scientific parameters and original source references.
+3. Validated actual Python environment/dependency versions and scientific input
+   structure, canonical grid compatibility, UTC coverage and current source
+   hashes. Review missing-data limitations under the existing algorithms;
+   acceptance does not mean every input is finite or every detector sample valid.
+4. A fresh approved output destination outside inputs, selections and the parent
+   review bundle, with existing no-overwrite/source-recheck safeguards retained.
+5. Manual local execution by the researcher, with no delegation to Codex, the
+   Scientific Agent, Stage 2, a scheduler or another automated executor.
+6. Reproducible records of the actual command, declared operator/machine,
+   interpreter/dependencies, start/end UTC, immediate exit code, input/code pins,
+   output hashes and validation, retaining partial failures without automatic retry.
+7. Researcher review of all remaining conditions and a separate explicit decision
+   before execution. Missing required scientific/runtime evidence means STOP.
+
+This profile does not require a multi-user identity platform, independent human
+authentication or implementation/acceptance of a controlled-runner Windows
+isolation platform. Researcher identity and local-condition declarations remain
+self-attestation. Windows Local Isolation and Trusted Human Authorization remain
+NOT VERIFIED; `execution_eligible=false` remains the protected-execution state.
+The separate manual decision records manual scope; these flags are not a manual
+readiness verdict or permission for any Agent. Separate Pre/Post model approvals
+and all scientific, source-integrity and output requirements still apply.
+
+**Agent-Controlled Protected Execution** retains all existing strict requirements:
+independent trusted human authorization, accepted Windows isolation and separate
+principals, protected code/input and signer/registry/Store custody, current
+revocation/expiry/trusted-time checks and revalidation at the protected execution
+boundary. See [future runner responsibilities](local_authorization.md#future-runner-responsibilities-and-scientific-limits)
+and [Windows acceptance](windows_isolation_acceptance.md). These prerequisites
+remain unresolved; Agent-controlled D remains prohibited. The manual profile
+provides no approval flag, fallback or bypass for this future execution model.
+
+**Active-run adoption STOP:** before applying this revision to
+`afghanistan_e2e_hitl_01`, the researcher must review the policy change and the
+focused prerequisite findings, including NaNs and the full-target-hour ratio
+denominators. In a separately authorized record update, document explicit profile
+acceptance, actual recording UTC, the reviewed Runbook version/hash, exact approved
+scope/Plan/selection pins and the disposition of remaining conditions. Distinguish
+requirements outside this profile from verified evidence; never relabel unverified
+isolation or identity as verified. Earlier approval does not imply adoption of
+this revision. Retain the current execution STOP until that review and decision
+are recorded; this documentation edit neither updates the handoff nor releases it.
 
 The fixed case is `afghanistan_2022`, event `us7000hj3u`, origin
 `2022-06-21T20:54:34Z`, M6.0, epicenter `(33.020,69.464)`, depth 4 km. Scientific
@@ -315,12 +373,15 @@ plan **content** with the later program-written `comparison_plan.json`. Do not
 rewrite either artifact to force byte equality. Program-generated source files
 retain their own original bytes and internal bindings.
 
-**MANDATORY HUMAN STOP:** record a separate `framework_d.authorization.execution_decision`,
-reviewer/time, rationale, approved scope, exact A/B selection pins, reviewed plan
-pin, and evidence for applicable environment/security prerequisites. Unresolved
-prerequisites or a decision other than approve mean STOP. Neither plan success
-nor a declaration in this JSON authenticates authorization. No script, Agent,
-Codex action, Stage 2 call or approval flag triggers the next operation.
+**MANDATORY HUMAN STOP:** first complete the profile review/adoption required by
+section 1.1. Record a separate `framework_d.authorization.execution_decision`,
+reviewer/time, rationale, approved execution profile/scope, exact A/B selection
+pins, reviewed Plan pin and evidence for that profile's applicable prerequisites.
+Unresolved mandatory prerequisites or a decision other than approve mean STOP.
+For the manual profile, independent authentication and controlled-runner isolation
+remain unverified and outside its requirements; retain the security flags above.
+Neither plan success nor a declaration in this JSON authenticates authorization.
+No script, Agent, Codex action, Stage 2 call or approval flag triggers execution.
 
 **Only the researcher, on their own approved local machine, may manually issue
 this standalone command after the separate approval.** It is deliberately not

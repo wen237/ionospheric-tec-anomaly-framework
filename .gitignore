@@ -28,3 +28,23 @@ outputs/
 
 # One-time local patch tool
 /update_spatial_visualization_fixed.py
+
+# Local credentials
+.env
+.env.*
+!.env.example
+/credentials/
+
+# Local research data and artifacts
+/local-data/
+/local-artifacts/
+
+# Temporary and backup files
+*.bak
+*.patch
+.tmp_*/
+
+# Private E2E-03 scientific reviews
+/docs/day5_e2e_phase8_final_scientific_review.md
+/docs/day5_e2e_phase8c_completion_report.md
+/docs/day5_e2e_post_submission_reliability_review.md

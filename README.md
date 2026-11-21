@@ -30,6 +30,24 @@ changing the existing scientific algorithms.
 
 ## Current Status
 
+**E2E-03 Human-in-the-Loop research MVP: completed and researcher-accepted
+with documented limitations.** The Afghanistan demonstration joins reusable
+scientific frameworks and saved-evidence validation with bounded live Pre- and
+Post-Spatial Agent interpretation, explicit human window selection, personal
+manual Framework D execution by the researcher, and final human review.
+
+This demonstrates a scoped research workflow and checked evidence bindings.
+It does not establish earthquake causality, validated precursor identification,
+predictive performance, complete physical attribution, or full equivalence with
+every published framework criterion. Windows isolation and trusted human
+authentication remain unverified; protected execution eligibility remains false,
+and Agent-controlled Framework D remains prohibited.
+
+See the [public HITL MVP guide](docs/e2e_hitl_mvp.md) for entry points, input
+requirements, current Agent limits, offline tests and reproducibility boundaries.
+Scientific inputs, local Handoffs, live traces and experiment outputs are not
+distributed with this software checkpoint.
+
 ### 1. Temporal Anomaly Detection Framework
 
 The Temporal Anomaly Detection Framework has been implemented and validated.
@@ -609,9 +627,10 @@ Observations and Remote Sensing*, vol. 19, pp. 23747–23759, 2026.
 - [Google Scholar profile](https://scholar.google.com/citations?user=8P4lE88AAAAJ&hl=zh-TW)
 - [IEEE Xplore author profile](https://ieeexplore.ieee.org/author/152460869663948)
 
-The existing Afghanistan scientific validation results described below are
-distinct from full end-to-end reproduction of the published case using the
-Modern CODE GIM interface, which has not yet been demonstrated.
+The accepted E2E-03 HITL MVP reuses the original historical B+C context alongside
+Modern 2022 temporal and spatial evidence. Its completion is distinct from full
+end-to-end equivalence with every published case criterion, which remains
+unestablished.
 
 ## Citation
 
@@ -749,19 +768,25 @@ Legacy references, regression tests, and selected real-data validation.
   geographic visualization (positive maximum 10%, negative maximum 85%).
 - Stage 1 Preparation Manifest, legacy-oriented Stage 2 workflow and CLI,
   and selected Legacy–Modern GIM equivalence tests.
+- E2E-03 HITL research MVP: reviewed candidate-window proposals, bounded
+  read-only Agent evidence tools and exact citations, researcher-manual A/B
+  spatial comparison, pinned EPZ evidence and researcher acceptance with
+  documented scientific, engineering and provenance limitations.
 
 **Remaining work:**
 
-- Derive reviewable candidate spatial windows from Framework A evidence and
-  B+C statistical/clustering results, while preserving researcher approval.
+- Evaluate the reviewable daily candidate-window policy beyond the fixed
+  Afghanistan example, while preserving researcher approval and documenting
+  differences from historical selection methods.
 - Integrate a separately selectable Modern GIM input into the formal Stage 2
   workflow without breaking the existing Legacy path.
 - Run and document current full-suite tests after further changes.
 
-The repository is being prepared for AI-agent-assisted development. Coding
-agents may handle implementation, testing and integration, while scientific
-interpretation and final acceptance stay with the researcher. See
-[AGENTS.md](AGENTS.md) and [AI Agent Handoff](docs/agent_handoff.md).
+Bounded scientific interpretation through read-only Agent tools is available.
+Coding agents may assist implementation, testing and integration; scientific
+decisions, manual execution approval and final acceptance remain with the
+researcher. See [AGENTS.md](AGENTS.md) and the
+[public HITL MVP guide](docs/e2e_hitl_mvp.md).
 
 The full autonomous A+B+C-to-D workflow is **not yet implemented**.
 
