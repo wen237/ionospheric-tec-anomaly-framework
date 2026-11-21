@@ -53,11 +53,11 @@ def _tool(name, description, properties=None):
                 parameters=object_schema(properties or {}))
 
 
-def definitions(mode, *, epz_available=False):
+def definitions(mode, *, epz_available=False, window_available=False, weather_available=False):
     if mode not in MODES:
         raise ValueError("Unknown mode")
     result = [
-        _tool("get_evidence_inventory", "Availability and integrity status; no external space-weather data."),
+        _tool("get_evidence_inventory", "Availability and integrity status of host-bound saved evidence."),
         _tool("get_temporal_summary", "Validated temporal counts, UTC coverage, detector parameters and grid location."),
         _tool("inspect_anomaly_interval", "Inspect saved hourly classifications within coverage; at most 168 hours per query.",
               dict(start_utc=dict(type="string"), end_utc=dict(type="string"))),
@@ -75,6 +75,20 @@ def definitions(mode, *, epz_available=False):
         ]
         if epz_available:
             result.append(_tool("get_epz_diagnostic_summary", "Read the host-pinned saved EPZ Diagnostic V1: shared grid-center membership, global peaks, per-center A/B counts, denominators, regional summaries and limitations. No geometry or scientific execution."))
+    interval = dict(start_utc=dict(type="string"), end_utc=dict(type="string"))
+    coordinates = dict(latitude=dict(type="number", minimum=-90, maximum=90),
+                       longitude=dict(type="number", minimum=-180, maximum=180))
+    if mode == "post_spatial" and window_available:
+        result += [
+            _tool("get_window_contribution_summary", "Saved hourly-derived nested-window diagnostic: exact extra UTC hours, counts versus ratios, full-hour denominators, validity and spatial contributions. No detector or Framework D execution."),
+            _tool("inspect_window_contribution_cell", "Saved hourly-derived contribution at the nearest physical grid cell; no interpolation or detector execution.", coordinates),
+            _tool("inspect_window_contribution_hours", "Inspect actual positive/negative decisions and global counts for at most 24 additional UTC hours, with finite inputs and rolling-reference diagnostics.", dict(**interval, **coordinates)),
+        ]
+    if weather_available:
+        result += [
+            _tool("get_space_weather_summary", "Saved UTC-aligned Kp, Dst and F10.7 evidence, native/exported resolution, missingness, extrema and source provenance. No retrieval or storm attribution."),
+            _tool("inspect_space_weather_interval", "Inspect exact saved numerical index observations over at most 24 UTC hours; missing values remain null.", interval),
+        ]
     return result
 
 
@@ -95,11 +109,15 @@ class EvidenceTools:
     Missing/corrupt bundles remain unavailable; they are not synthesized.
     """
 
-    def __init__(self, evidence_root, mode, *, epz_diagnostic=None, epz_sha256=None, epz_size_bytes=None):
+    def __init__(self, evidence_root, mode, *, epz_diagnostic=None, epz_sha256=None, epz_size_bytes=None,
+                 reasoning_bindings=None):
         if mode not in MODES:
             raise ValueError("Unknown mode")
         # Reject Pre bindings (including partial bindings) before any path lookup.
         self.epz_binding = host_binding(mode, epz_diagnostic, epz_sha256, epz_size_bytes, MAX_FILE_BYTES)
+        from .reasoning_evidence import bindings
+        self.reasoning_bindings = bindings(mode, reasoning_bindings, MAX_FILE_BYTES)
+        self.reasoning_views = {}
         self.epz_projection = None
         if self.epz_binding is not None:
             requested_root = Path(evidence_root).absolute()
@@ -146,6 +164,16 @@ class EvidenceTools:
                         self.status["epz_diagnostic"] = "validated_snapshot"
                     except (OSError, ValueError, KeyError, TypeError, IndexError, OverflowError, RecursionError):
                         self.epz_projection = None
+        if self.reasoning_bindings:
+            from .reasoning_evidence import load_bound
+            for kind, pin in self.reasoning_bindings.items():
+                self.status[kind] = "unavailable_or_invalid"
+                if self.bundle is not None:
+                    try:
+                        self.reasoning_views[kind] = load_bound(self, kind, pin)
+                        self.status[kind] = "validated_snapshot"
+                    except (OSError, ValueError, KeyError, TypeError, IndexError, OverflowError, RecursionError, BadZipFile, EOFError):
+                        pass
 
     def _path(self, identity):
         # Internal constants or a validated host-only identity; never model paths.
@@ -331,13 +359,15 @@ class EvidenceTools:
     def tool_definitions(self):
         """Advertise EPZ only after this host binding validated successfully."""
         return definitions(self.mode, epz_available=(self.epz_binding is not None
-            and self.epz_projection is not None and self.status.get("epz_diagnostic") == "validated_snapshot"))
+            and self.epz_projection is not None and self.status.get("epz_diagnostic") == "validated_snapshot"),
+            window_available=self.status.get("window_sensitivity") == "validated_snapshot",
+            weather_available=self.status.get("space_weather") == "validated_snapshot")
 
     def call(self, name, arguments):
         """No exceptions or source-recorded strings escape as tool errors."""
         # Direct Post-Spatial EPZ calls still fail as unavailable when unbound/invalid.
         # This dispatch catalog is distinct from the model's advertised definitions.
-        allowed = {t["name"]: t for t in definitions(self.mode, epz_available=True)}
+        allowed = {t["name"]: t for t in definitions(self.mode, epz_available=True, window_available=True, weather_available=True)}
         if name not in allowed:
             return dict(ok=False, error="tool_not_allowed")
         try:
@@ -368,6 +398,10 @@ class EvidenceTools:
             return dict(ok=False, error="evidence_unavailable")
         if name == "get_epz_diagnostic_summary" and self.status.get("epz_diagnostic") != "validated_snapshot":
             return dict(ok=False, error="evidence_unavailable")
+        kind = ("window_sensitivity" if name.startswith(("get_window_contribution", "inspect_window_contribution"))
+                else "space_weather" if name in ("get_space_weather_summary", "inspect_space_weather_interval") else None)
+        if kind is not None and self.status.get(kind) != "validated_snapshot":
+            return dict(ok=False, error="evidence_unavailable")
         try:
             self.recheck()
         except (ValueError, OSError):
@@ -383,12 +417,21 @@ class EvidenceTools:
 
     def _dispatch(self, name, args):
         pre = PRE_ROOT + "/"
+        external = dict(Kp="unavailable", Dst="unavailable", F10_7="unavailable")
+        if self.status.get("space_weather") == "validated_snapshot":
+            summary = self.reasoning_views["space_weather"]["report"]["summary"]
+            external = {label: "validated_snapshot" if summary[key]["available_hourly_rows"] else "no_observations"
+                        for label, key in (("Kp", "kp"), ("Dst", "dst"), ("F10_7", "f107"))}
+        if name in {"get_window_contribution_summary", "inspect_window_contribution_cell", "inspect_window_contribution_hours",
+                    "get_space_weather_summary", "inspect_space_weather_interval"}:
+            from .reasoning_evidence import dispatch
+            return dispatch(self, name, args)
         if name == "get_epz_diagnostic_summary":
             refs = self._refs(self.epz_binding["artifact"], POST_ROOT + "/comparison_summary.json",
                 *(POST_ROOT + "/" + n + "/spatial_arrays.npz" for n in EXPERIMENTS.values()))
             return dict(**self.epz_projection, diagnostic_identity=dict(self.epz_binding)), refs
         if name == "get_evidence_inventory":
-            return dict(mode=self.mode, availability=self.status, external_indices=dict(Kp="unavailable", Dst="unavailable", F10_7="unavailable"),
+            return dict(mode=self.mode, availability=self.status, external_indices=external,
                         verification="snapshot consistency only; origin and raw-source custody not authenticated"), []
         if name == "get_temporal_summary":
             data = {k: self.temporal[k] for k in ("analysis", "counts", "parameters", "location", "input_time_convention")}
@@ -430,11 +473,14 @@ class EvidenceTools:
                             POST_ROOT + "/" + EXPERIMENTS[label] + "/experiment_summary.json",
                             SELECTION_ROOT + "/" + EXPERIMENTS[label] + "/selection_record.json")
         if name == "compare_spatial_experiments":
+            if self.status.get("space_weather") == "validated_snapshot":
+                refs += self._refs(self.reasoning_bindings["space_weather"]["artifact"])
             return dict(direction="B minus A", ratio_difference_unit="percentage_points", statistics=self.statistics,
                         denominators={k: int(a["ratio_denominator"]) for k, a in self.arrays.items()},
                         stable_peak_coordinates={p: self._peaks(self.arrays["A"])[p]["maximum_grid_points"] ==
                                                  self._peaks(self.arrays["B"])[p]["maximum_grid_points"] for p in ("positive", "negative")},
-                        missing_physical_evidence=["Kp", "Dst", "F10.7"], effective_detector_valid_counts=None,
+                        missing_physical_evidence=[label for label, key in (("Kp", "Kp"), ("Dst", "Dst"), ("F10.7", "F10_7"))
+                                                   if external[key] != "validated_snapshot"], effective_detector_valid_counts=None,
                         scope="Global grid statistics are not an epicentral distribution or causal evidence."), refs
         a = self.arrays["A"]
         i = int(np.argmin(np.abs(a["latitudes"] - args["latitude"])))

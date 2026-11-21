@@ -10,6 +10,11 @@ This public guide describes the software and reproduction boundaries. Original
 scientific inputs, accepted local Handoffs, live API traces, private audit records
 and generated experiment artifacts are not distributed here.
 
+The opt-in [Scientific Reasoning Enhancement](scientific_reasoning_enhancement.md)
+extends this workflow with hourly window contribution diagnostics, saved
+space-weather evidence and bounded follow-up proposals. It preserves the accepted
+assessment schema when disabled and grants no scientific execution authority.
+
 ## Architecture and human decisions
 
 ```mermaid
